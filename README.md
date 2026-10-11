@@ -98,7 +98,7 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
 
 | Command | Effect |
 |---|---|
-| `/opencode-go-sync` (chat, if a command registry exists) | Immediate rewrite from snapshot + live registry |
+| `/opencode-go-sync` (chat) | Immediate rewrite from snapshot + live registry. Registered through `ctx.root` into the global command layer, so it appears in the `/` menu for every session (registering through the plugin fiber context lands outside all agent scope chains: self-probe green, menu empty — fixed in 0.1.4) |
 | `node bin/sync.mjs --dry-run` (default) | Report: field diffs, new live IDs, stale candidates — writes nothing |
 | `node bin/sync.mjs --write` | Rewrite snapshot fields from the registry + stamp the date |
 | `node bin/sync.mjs --check` | Offline snapshot rule check |
