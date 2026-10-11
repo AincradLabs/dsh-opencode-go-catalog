@@ -1,6 +1,6 @@
 {
   "name": "dsh-opencode-go-catalog",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "Self-maintained OpenCode Go model catalog for DeepSeek Harness: protocol-separated sibling routes (extras/responses/messages) via the settings.mutate seam, with live-synced reasoning efforts. Never touches the built-in opencode-go route.",
   "type": "module",
   "main": "./lib/index.js",

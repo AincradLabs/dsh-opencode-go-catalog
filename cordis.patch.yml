@@ -18,6 +18,7 @@
       config:
         enabled: true
         refreshReasoning: true
+        sessionHeaderValue: dsh-opencode-go-catalog # false → kein statischer x-opencode-session-Header (400-Risiko)
         intervalMinutes: 240
         startupDelaySeconds: 10
         refreshTimeoutMs: 120000
