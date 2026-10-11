@@ -1,0 +1,44 @@
+{
+  "name": "dsh-opencode-go-catalog",
+  "version": "0.1.0",
+  "description": "Eigener OpenCode-Go-Modellkatalog für DeepSeek Harness: verwaltet protokollgetrennte Sibling-Routen (extras/responses/messages) über die settings.mutate-Naht, mit enabled-Toggle. Fasst die eingebaute opencode-go-Route nie an.",
+  "type": "module",
+  "main": "./lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "lib/reasoning.mjs",
+    "bin/sync.mjs",
+    "bin/snippet.mjs",
+    "cordis.patch.yml",
+    "catalog/models.json",
+    "weg-a-schnellstart.yml",
+    "verify.mjs",
+    "README.md",
+    "INSTALL.md",
+    "LICENSE"
+  ],
+  "license": "MIT",
+  "author": "AincradLabs",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/AincradLabs/dsh-opencode-go-catalog.git"
+  },
+  "bugs": {
+    "url": "https://github.com/AincradLabs/dsh-opencode-go-catalog/issues"
+  },
+  "homepage": "https://github.com/AincradLabs/dsh-opencode-go-catalog#readme",
+  "keywords": ["deepseek-harness", "dsh", "dsh-plugin", "opencode-go", "llm", "model-catalog"],
+  "engines": {
+    "node": ">=18"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    }
+  }
+}

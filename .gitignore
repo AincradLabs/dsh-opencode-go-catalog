@@ -1,0 +1,13 @@
+# Local-only runtime cache (ETag bodies) — re-fetched automatically.
+catalog/.cache/
+# Editor / tool leftovers.
+*.TMP
+*.tmp
+# Never ship dependencies or secrets.
+node_modules/
+.env
+*.pem
+*.key
+credentials.yaml
+*token*
+*secret*
