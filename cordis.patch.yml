@@ -1,24 +1,28 @@
 # Bundle-Aktivierung für dsh-opencode-go-catalog.
-# Top-Level-YAML-Array (Cordis-Patch-Dialekt). Die `config` ersetzt die Row
-# KOMPLETT (kein Deep-Merge) — deshalb steht hier immer die volle Config.
+# WICHTIG: Neue Rows gehören unter `- insert:` — ein nacktes `- id:` auf
+# Top-Level adressiert eine BESTEHENDE Row (Override) und wird verworfen,
+# wenn es sie nicht gibt ("patch: entry ... not found", verified 2026-10-11).
+# Die `config` ersetzt die Row KOMPLETT (kein Deep-Merge) — deshalb steht
+# hier immer die volle Config.
 #
 # TOGGLE, Ebene 1 (ganzes Plugin an/aus, ohne etwas zu löschen):
-#   disabled: true   unter diese Row setzen -> Plugin lädt nicht mehr.
+#   disabled: true   unter die Row setzen -> Plugin lädt nicht mehr.
 # TOGGLE, Ebene 2 (nur Sibling-Routen an/aus, Plugin bleibt geladen):
-#   enabled: false   in der config unten ODER im Settings-Namespace
-#   `opencode-go-catalog` (UI) -> entfernt extras/responses/messages wieder.
+#   eigene `- id: opencode-go-catalog`-Row mit VOLLER config und
+#   `enabled: false` ins Profil-Patch legen -> entfernt extras/responses/messages wieder.
 #
 # Die eingebaute `opencode-go`-Route wird von diesem Plugin NIE angefasst.
-- id: opencode-go-catalog
-  name: dsh-opencode-go-catalog
-  config:
-    enabled: true
-    refreshReasoning: true
-    intervalMinutes: 240
-    startupDelaySeconds: 5
-    refreshTimeoutMs: 120000
-    catalogPath: ./catalog/models.json
-    managedRoutes:
-      - opencode-go-extras
-      - opencode-go-responses
-      - opencode-go-messages
+- insert:
+    - id: opencode-go-catalog
+      name: dsh-opencode-go-catalog
+      config:
+        enabled: true
+        refreshReasoning: true
+        intervalMinutes: 240
+        startupDelaySeconds: 10
+        refreshTimeoutMs: 120000
+        catalogPath: ./catalog/models.json
+        managedRoutes:
+          - opencode-go-extras
+          - opencode-go-responses
+          - opencode-go-messages
