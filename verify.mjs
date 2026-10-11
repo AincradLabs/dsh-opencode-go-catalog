@@ -38,6 +38,15 @@ patchLines[0].trim() === '- id: opencode-go-catalog' ? ok('Top-Level-Array mit s
 patch.includes('name: dsh-opencode-go-catalog') ? ok('Row-Name = Paketname') : fail('Row-Name muss Paketname sein');
 patch.includes('enabled:') ? ok('enabled-Toggle vorhanden') : fail('enabled fehlt');
 
+console.log('== lib/index.js (Host-Naht, gegen DSH 0.2.0-rc.2 Quellen geprüft) ==');
+const hostSrc = fs.readFileSync(path.join(ROOT, 'lib', 'index.js'), 'utf8');
+hostSrc.includes('ctx.commands.register({') ? ok('command-Registrierung in Objektform') : fail('commands.register-Objektform fehlt');
+hostSrc.includes('mutate(ADAPTER_NS, ops') ? ok('mutate(ns, ops)-Naht mit Entry-Namespace') : fail('mutate(ns, ops)-Naht fehlt');
+hostSrc.includes('settingsNamespace') ? fail('settingsNamespace-Import muss raus (Host-API heißt anders)') : ok('kein settingsNamespace-Import');
+hostSrc.includes("reg.register('opencode-go-sync'") ? fail('alte register-Signatur noch vorhanden') : ok('alte register-Signatur weg');
+hostSrc.includes('startupDelaySeconds') && hostSrc.includes('setTimeout') ? ok('Startup-Delay implementiert') : fail('Startup-Delay fehlt');
+hostSrc.includes('STATUS_FILE') ? ok('status.json-Diagnose vorhanden') : fail('status.json-Diagnose fehlt');
+
 console.log('== catalog/models.json ==');
 const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'catalog', 'models.json'), 'utf8'));
 const routes = doc.routes ?? {};
