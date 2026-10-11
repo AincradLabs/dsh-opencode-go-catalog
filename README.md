@@ -84,7 +84,7 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
     enabled: true            # false → sibling routes are removed again
     refreshReasoning: true   # false → use snapshot file values only, no network
     intervalMinutes: 240     # 0 → startup only
-    startupDelaySeconds: 5
+    startupDelaySeconds: 10
     refreshTimeoutMs: 120000
     catalogPath: ./catalog/models.json
     managedRoutes:
@@ -141,6 +141,23 @@ Deliberately excluded (unverified Oct 2026, see `deliberatelyExcluded` in the sn
   `opencode-go` route keeps running untouched.
 - **Whole plugin off:** add `disabled: true` to the `opencode-go-catalog` bundle row,
   restart. Nothing needs deleting.
+
+## Enable / disable
+
+- **Siblings off, plugin stays loaded:** add your own `- id: opencode-go-catalog` row
+  (with the FULL config — patches replace, never merge; copy
+  [cordis.patch.yml](cordis.patch.yml) as the template) to your profile patch with
+  `enabled: false`. The three routes are removed again via unset ops; the built-in
+  `opencode-go` route keeps running untouched.
+- **Whole plugin off:** `disabled: true` on the bundle row (or the market's disable
+  list), restart. Nothing needs deleting.
+
+## Diagnostics
+
+After every sync attempt the plugin writes `status.json` next to `package.json`
+(time, ok, via, changed, command registration, fetch source, error). Open it in any
+editor — no log access needed. If the picker stays empty, send this file's content
+with your report.
 
 ## Troubleshooting
 
