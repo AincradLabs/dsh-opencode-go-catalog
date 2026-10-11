@@ -49,6 +49,7 @@ hostSrc.includes('startupDelaySeconds') && hostSrc.includes('setTimeout') ? ok('
 hostSrc.includes('STATUS_FILE') ? ok('status.json-Diagnose vorhanden') : fail('status.json-Diagnose fehlt');
 (!hostSrc.includes('return { ok: true }') && !hostSrc.includes('return { ok: false, degraded')) ? ok('apply() löst void auf (Fiber-Effect-Regel, kein Invalid effect)') : fail('apply() darf kein Objekt zurückgeben (Invalid effect)');
 hostSrc.includes("ctx.inject(['settings']") ? ok('Service-Zugriff via ctx.inject (Fiber-Scope)') : fail('ctx.inject fehlt — direkter Zugriff ist im Fiber leer');
+hostSrc.includes('x-opencode-session') ? ok('statischer Session-Header für Sibling-Routen (gegen MissingSessionID-400)') : fail('x-opencode-session fehlt');
 
 console.log('== catalog/models.json ==');
 const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'catalog', 'models.json'), 'utf8'));

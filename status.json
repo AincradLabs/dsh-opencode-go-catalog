@@ -1,0 +1,13 @@
+{
+  "plugin": "dsh-opencode-go-catalog",
+  "time": "2026-10-11T01:46:16.042Z",
+  "reason": "command",
+  "enabled": true,
+  "fetch": "snapshot",
+  "ok": true,
+  "via": "settings.mutate",
+  "changed": [
+    "~opencode-go-extras"
+  ],
+  "ms": 1
+}

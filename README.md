@@ -83,6 +83,7 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
   config:
     enabled: true            # false → sibling routes are removed again
     refreshReasoning: true   # false → use snapshot file values only, no network
+    sessionHeaderValue: 'dsh-opencode-go-catalog'  # false → no static session header (400 risk)
     intervalMinutes: 240     # 0 → startup only
     startupDelaySeconds: 10
     refreshTimeoutMs: 120000
@@ -134,13 +135,21 @@ Deliberately excluded (unverified Oct 2026, see `deliberatelyExcluded` in the sn
 `glm-5`, `kimi-k2.5`, `mimo-v2-omni/pro`, `qwen3.5-plus`, `hy3-preview`,
 `space-bunny-free`, `minimax-m2.5`.
 
-## Enable / disable
+## Session header (MissingSessionID-400)
 
-- **Siblings off, plugin stays loaded:** set `enabled: false` (settings namespace
-  `opencode-go-catalog` or bundle config). The three routes are removed; the built-in
-  `opencode-go` route keeps running untouched.
-- **Whole plugin off:** add `disabled: true` to the `opencode-go-catalog` bundle row,
-  restart. Nothing needs deleting.
+OpenCode Go requires `x-opencode-session` (stable per-conversation ID) since 09/05 —
+see [Discussion #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495).
+pi-ai attaches it only inside its own `opencode-go` provider module; hand-declared
+routes are rebuilt "from parts" without that wrapper, so their requests fail with
+`400 MissingSessionID` (telemetry: Spark path 74–90% coverage, everything else ~0%).
+
+Until the adapter learns per-conversation `sessionHeader`, this plugin therefore sets
+a **static** header on every sibling route (`sessionHeaderValue`, default
+`'dsh-opencode-go-catalog'`, off with `false`). Trade-off, stated plainly: one fixed
+ID across all conversations means fewer cache hits — slower and pricier than a proper
+per-conversation ID (user-verified). It beats a hard `400`. The built-in `opencode-go`
+route is never touched (its working Spark path stays as is). Remove the workaround the
+day the adapter ships `sessionHeader` support (upstream: `earendil-works/pi#9326`).
 
 ## Enable / disable
 
@@ -167,7 +176,8 @@ with your report.
 | `model '…' needs an api` | Hand-declared route without `api` | Set `api` + `baseURL` + non-empty `models` (the plugin does this automatically) |
 | Images rejected before sending | `input` is `[text]` | Set `input: [text, image]` per model (only with proven vision support) |
 | No effort menu | `reasoningEfforts` missing | Adopt from the registry's `reasoning_options`; mind `off: none` vs empty `off` |
-| Installed but seemingly idle | — | This plugin uses no shell hooks; check the boot log for `[opencode-go-catalog]` |
+| `400 MissingSessionID` | Gateway needs `x-opencode-session`, adapter sends it only on catalog routes | Plugin sets a static one per sibling route (see above); per-conversation fix needs an adapter update |
+| Installed but seemingly idle | — | This plugin uses no shell hooks; check `status.json` next to `package.json` |
 | Install gate refuses | Peer range with stable lower bound | Not applicable here (no `@deepseek-ai/dsh*` peers declared on purpose) |
 
 Never hand-edit `node_modules/…/pi-ai/dist/providers/data/opencode-go.json` — the next DSH
