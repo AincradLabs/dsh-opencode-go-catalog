@@ -1,5 +1,7 @@
 # Local-only runtime cache (ETag bodies) — re-fetched automatically.
 catalog/.cache/
+# Runtime diagnostics written by the plugin itself (per install, never ship).
+status.json
 # Editor / tool leftovers.
 *.TMP
 *.tmp
