@@ -304,6 +304,16 @@
             "medium": "medium",
             "xhigh": "xhigh"
           }
+        },
+        {
+          "id": "qwen3.7-plus",
+          "name": "Qwen3.7 Plus",
+          "contextWindow": 1000000,
+          "maxTokens": 65536,
+          "input": [
+            "text",
+            "image"
+          ]
         }
       ]
     }
