@@ -1,23 +1,23 @@
 // bin/sync.mjs — Snapshot-Pflege und Auto-Vorschau aus der Live-Lage.
 //
 // QUELLEN (alle keyless):
-//   https://models.opencode.ai/api.json   Registry: Name, Limits, Modalitaeten,
+//   https://models.opencode.ai/api.json   Registry: Name, Limits, Modalitäten,
 //                                         reasoning_options (models.dev-Format)
 //   https://opencode.ai/zen/go/v1/models  Roster: welche IDs es JETZT gibt
 //   https://opencode.ai/docs/go/          Protokoll-Orakel: Endpoint-Tabelle
 //
-// PROTOKOLL-OHNE-RATEN: Die frueheren Listen KNOWN_RESPONSES/KNOWN_MESSAGES
+// PROTOKOLL-OHNE-RATEN: Die früheren Listen KNOWN_RESPONSES/KNOWN_MESSAGES
 // sind ersetzt. Das Protokoll kommt aus der Doku-Endpoint-Tabelle
 // (lib/protocols.mjs); eine ID ohne Doku-Zeile wird als "PROBEN!" gemeldet und
-// NICHT einsortiert. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprueche zum
+// NICHT einsortiert. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprüche zum
 // hand-kalibrierten Snapshot.
 //
 // GEBRAUCH:
 //   node bin/sync.mjs                 Dry-run: Feld-Diffs + neue IDs + Protokoll
 //   node bin/sync.mjs --auto          Vorschau: was der Auto-Modus in DSH schreibt
 //   node bin/sync.mjs --write         Felder fresh schreiben + generated-Datum
-//   node bin/sync.mjs --adopt         Live-Mitgliedschaft in den Snapshot uebernehmen
-//   node bin/sync.mjs --check         offline: nur Snapshot-Regeln pruefen
+//   node bin/sync.mjs --adopt         Live-Mitgliedschaft in den Snapshot übernehmen
+//   node bin/sync.mjs --check         offline: nur Snapshot-Regeln prüfen
 
 import fs from 'node:fs';
 import path from 'node:path';
@@ -40,9 +40,17 @@ function checkSnapshot(doc) {
       problems.push(`${route}: unbekannte api ${rec.api}`);
     }
     if (rec.baseURL !== 'https://opencode.ai/zen/go/v1') problems.push(`${route}: baseURL weicht ab`);
+    if (!(rec.models ?? []).length) problems.push(`${route}: keine Modelle — llm-pi-ai lehnt "resolves no models" ab`);
     for (const m of rec.models ?? []) {
       if (!m.id || !m.name || !m.input) {
         problems.push(`${route}/${m.id ?? '?'}: Pflichtfeld fehlt (id/name/input)`);
+      }
+      // Kapazitäten sind optional (der Auto-Modus lässt sie weg, wenn die
+      // Registry keine nennt) — steht ein Wert da, muss er positiv sein.
+      for (const f of ['contextWindow', 'maxTokens']) {
+        if (m[f] !== undefined && (!Number.isInteger(m[f]) || m[f] <= 0)) {
+          problems.push(`${route}/${m.id}: ${f} muss positiver Integer sein (${m[f]})`);
+        }
       }
       if (seen.has(m.id)) problems.push(`Doppel-ID: ${m.id}`);
       seen.add(m.id);
@@ -101,7 +109,7 @@ async function main() {
   console.log(`Registry: geladen${cached ? ' (304, Cache)' : ''}`);
   const goModels = registry['opencode-go']?.models ?? registry?.providers?.['opencode-go']?.models;
   if (!goModels || typeof goModels !== 'object') {
-    console.log('Registry-Parsing: opencode-go-Sektion nicht gefunden (Format geaendert?) — Abbruch');
+    console.log('Registry-Parsing: opencode-go-Sektion nicht gefunden (Format geändert?) — Abbruch');
     process.exit(1);
   }
   const regIds = new Set(Object.keys(goModels).map((k) => k.split('/').pop()));
@@ -142,7 +150,7 @@ async function main() {
     return;
   }
 
-  // Feld-Diffs fuer die IDs, die im Snapshot stehen und live noch existieren.
+  // Feld-Diffs für die IDs, die im Snapshot stehen und live noch existieren.
   const fieldChanges = [];
   const needsReview = [];
   for (const [route, rec] of Object.entries(snapshot.routes)) {
@@ -159,7 +167,7 @@ async function main() {
         delete m.needsReview;
       } else {
         m.needsReview = true;
-        needsReview.push(`${m.id}: keine Limits im Registry — alte Werte behalten, pruefen!`);
+        needsReview.push(`${m.id}: keine Limits im Registry — alte Werte behalten, prüfen!`);
       }
       m.input = freshInput;
       if (freshEfforts === undefined) delete m.reasoningEfforts;
@@ -187,7 +195,7 @@ async function main() {
     console.log(`Nur im Roster, ohne Metadaten (bleibt draussen): ${rosterOnly.join(', ')}`);
   }
   if (needsReview.length) {
-    console.log('Prueffaelle:');
+    console.log('Prüffälle:');
     for (const n of needsReview) console.log('  ! ' + n);
   }
   const gone = [...snapIds].filter((id) => !(roster.ids ?? new Set()).has(id)).sort();
@@ -195,7 +203,7 @@ async function main() {
 
   if (adopt) {
     if (!auto.ok) {
-      console.log(`\n--adopt nicht moeglich: ${auto.reason}`);
+      console.log(`\n--adopt nicht möglich: ${auto.reason}`);
       process.exit(1);
     }
     const stamp = new Date().toISOString().slice(0, 10);
@@ -206,7 +214,7 @@ async function main() {
     }
     snapshot.generated = stamp;
     fs.writeFileSync(SNAPSHOT, JSON.stringify(snapshot, null, 2) + '\n');
-    console.log(`\nSnapshot uebernommen: ${auto.stats.members} Modelle`
+    console.log(`\nSnapshot übernommen: ${auto.stats.members} Modelle`
       + (auto.stats.added.length ? `, +${auto.stats.added.join(' +')}` : '')
       + (auto.stats.removed.length ? `, -${auto.stats.removed.join(' -')}` : '')
       + ` -> ${SNAPSHOT}`);
@@ -215,7 +223,7 @@ async function main() {
     fs.writeFileSync(SNAPSHOT, JSON.stringify(snapshot, null, 2) + '\n');
     console.log('\nSnapshot geschrieben: ' + SNAPSHOT);
   } else {
-    console.log('\nDry-run: nichts geschrieben. Mit --write (Felder) oder --adopt (Mitgliedschaft) uebernehmen.');
+    console.log('\nDry-run: nichts geschrieben. Mit --write (Felder) oder --adopt (Mitgliedschaft) übernehmen.');
   }
 }
 

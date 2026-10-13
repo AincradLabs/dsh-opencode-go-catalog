@@ -1,13 +1,13 @@
 {
   "generated": "2026-10-13",
-  "policy": "Dieser Snapshot ist der OFFLINE-RUECKFALL und die Routen-Definition (api/baseURL/displayName). Im Normalbetrieb baut das Plugin die Mitgliedschaft bei jedem Sync frisch aus Live-Roster (https://opencode.ai/zen/go/v1/models) + Protokoll-Orakel (Doku-Endpoint-Tabelle) — neue Modelle erscheinen ohne Handarbeit, abgekuendigte fallen raus. Kapazitaeten werden NIE geraten: fehlt ein Wert im Registry, bleibt ein hier verifizierter Wert stehen, sonst wird das Feld weggelassen (llm-pi-ai setzt dann 262144/32768) plus needsReview. Die eingebaute opencode-go-Route bleibt unberuehrt; diese Datei beschreibt NUR die drei Sibling-Routen.",
+  "policy": "Dieser Snapshot ist der OFFLINE-RÜCKFALL und die Routen-Definition (api/baseURL/displayName). Im Normalbetrieb baut das Plugin die Mitgliedschaft bei jedem Sync frisch aus Live-Roster (https://opencode.ai/zen/go/v1/models) + Protokoll-Orakel (Doku-Endpoint-Tabelle) — neue Modelle erscheinen ohne Handarbeit, abgekündigte fallen raus. Kapazitäten werden NIE geraten: fehlt ein Wert im Registry, bleibt ein hier verifizierter Wert stehen, sonst wird das Feld weggelassen (llm-pi-ai setzt dann 262144/32768) plus needsReview. Die eingebaute opencode-go-Route bleibt unberührt; diese Datei beschreibt NUR die drei Sibling-Routen.",
   "sources": [
     "https://opencode.ai/docs/go/",
     "https://models.dev/providers/opencode-go",
     "https://models.opencode.ai/api.json",
     "https://opencode.ai/zen/go/v1/models"
   ],
-  "protocolNote": "Protokollquelle ist die Endpoint-Tabelle in https://opencode.ai/docs/go/ (Model ID -> /go/v1/chat/completions|responses|messages), ausgewertet von lib/protocols.mjs. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprueche zu diesem Snapshot. Der Gateway nennt das Protokoll in keinem JSON — eine ID ohne Doku-Zeile bleibt unresolved und wird gemeldet, nie geraten (falsch einsortiert = Request scheitert zur Laufzeit mit 500 bzw. 401 'not supported for format oa-compat'). Der MITGELIEFERTE pi-ai-Katalog ist als Orakel untauglich: er widerspricht der Doku bei minimax-m2.7, qwen3.7-plus und qwen3.8-max.",
+  "protocolNote": "Protokollquelle ist die Endpoint-Tabelle in https://opencode.ai/docs/go/ (Model ID -> /go/v1/chat/completions|responses|messages), ausgewertet von lib/protocols.mjs. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprüche zu diesem Snapshot. Der Gateway nennt das Protokoll in keinem JSON — eine ID ohne Doku-Zeile bleibt unresolved und wird gemeldet, nie geraten (falsch einsortiert = Request scheitert zur Laufzeit mit 500 bzw. 401 'not supported for format oa-compat'). Der MITGELIEFERTE pi-ai-Katalog ist als Orakel untauglich: er widerspricht der Doku bei minimax-m2.7, qwen3.7-plus und qwen3.8-max.",
   "routes": {
     "opencode-go-extras": {
       "api": "openai-completions",

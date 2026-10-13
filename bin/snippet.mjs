@@ -46,7 +46,7 @@ for (const [route, rec] of Object.entries(doc.routes)) {
   for (const m of rec.models) {
     out.push(`          - id: ${m.id}`);
     out.push(`            name: "${esc(m.name)}"`);
-    // Kapazitaeten nur wenn verifiziert — fehlt ein Wert, entscheidet
+    // Kapazitäten nur wenn verifiziert — fehlt ein Wert, entscheidet
     // llm-pi-ai (Default 262144/32768) statt einer erfundenen Zahl.
     if (Number.isInteger(m.contextWindow)) out.push(`            contextWindow: ${m.contextWindow}`);
     if (Number.isInteger(m.maxTokens)) out.push(`            maxTokens: ${m.maxTokens}`);

@@ -72,11 +72,11 @@ for (const [route, api] of Object.entries(expected)) {
   (rec.baseURL === 'https://opencode.ai/zen/go/v1') ? ok(`${route}: baseURL korrekt`) : fail(`${route}: baseURL falsch`);
   for (const m of rec.models ?? []) {
     total++;
-    // Pflicht ist id/name/input. Kapazitaeten sind OPTIONAL (der Auto-Modus
-    // laesst sie weg, wenn die Registry keine nennt -> llm-pi-ai-Defaults);
-    // stehen sie da, muessen sie positve Integer sein. Muss zu
-    // bin/sync.mjs checkSnapshot() passen — sonst faellt der dokumentierte
-    // Ablauf "--adopt -> verify.mjs" ueber seinen eigenen Zustand.
+    // Pflicht ist id/name/input. Kapazitäten sind OPTIONAL (der Auto-Modus
+    // lässt sie weg, wenn die Registry keine nennt -> llm-pi-ai-Defaults);
+    // stehen sie da, müssen sie positive Integer sein. Muss zu
+    // bin/sync.mjs checkSnapshot() passen — sonst fällt der dokumentierte
+    // Ablauf "--adopt -> verify.mjs" über seinen eigenen Zustand.
     if (!m.id || !m.name || !m.input) fail(`${route}: ${m.id ?? '?'} unvollständig (id/name/input)`);
     for (const f of ['contextWindow', 'maxTokens']) {
       if (m[f] !== undefined && (!Number.isInteger(m[f]) || m[f] <= 0)) fail(`${m.id}: ${f} muss positiver Integer sein (${m[f]})`);
@@ -113,7 +113,7 @@ const parsed = parseProtocolTable(FIXTURE, { roster: fixRoster });
   : fail('Roster-Filter greift nicht');
 const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>', { roster: fixRoster });
 (conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table))
-  ? ok('widerspruechliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
+  ? ok('widersprüchliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
   : fail('Konflikt-Erkennung greift nicht: ' + JSON.stringify({ conflicts: conflict.conflicts, value: conflict.table['cat-jam-free'] }));
 
 console.log('== lib/live.mjs (Auto-Mitgliedschaft, Fixture offline) ==');
@@ -138,19 +138,19 @@ const autoFixture = buildAutoCatalog({
   registryModels: regFixture,
   roster: ['a-new', 'veto-me', 'no-proto', 'no-meta'],
   protocols: { 'a-new': 'openai-completions', 'veto-me': 'openai-completions', 'no-meta': 'openai-responses' },
-  cfg: { minAutoModels: 1 }, // Fixture hat nur 1 Mitglied — Gurt unten separat geprueft
+  cfg: { minAutoModels: 1 }, // Fixture hat nur 1 Mitglied — Gurt unten separat geprüft
 });
 const only = autoFixture.routes['opencode-go-extras'].models;
 (autoFixture.ok && autoFixture.stats.members === 2) ? ok('Mitglied = Roster ∩ Registry ∩ Protokoll (2 von 4: a-new + no-meta)') : fail('Mitgliederzahl falsch: ' + autoFixture.stats.members);
 (only.length === 1 && only[0].id === 'a-new' && only[0].contextWindow === 111 && only[0].maxTokens === 22) ? ok('Registry-Felder landen im Eintrag') : fail('Eintrag falsch aufgebaut');
-(JSON.stringify(only[0].input) === '["text","image"]') ? ok('Modalitaeten gemappt') : fail('input falsch: ' + JSON.stringify(only[0].input));
+(JSON.stringify(only[0].input) === '["text","image"]') ? ok('Modalitäten gemappt') : fail('input falsch: ' + JSON.stringify(only[0].input));
 (JSON.stringify(only[0].reasoningEfforts) === '{"low":"low","high":"high"}') ? ok('reasoningEfforts gemappt') : fail('reasoningEfforts falsch');
 const noLimits = autoFixture.routes['opencode-go-responses'].models[0];
 (noLimits?.id === 'no-meta' && noLimits.contextWindow === undefined && noLimits.needsReview === true)
   ? ok('fehlende Limits werden NICHT erfunden (Feld weg + needsReview -> llm-pi-ai-Defaults)')
   : fail('Limit-Regel verletzt: ' + JSON.stringify(noLimits));
 (autoFixture.stats.added.includes('a-new') && autoFixture.stats.removed.includes('old-gone')) ? ok('added/removed korrekt gemeldet') : fail('added/removed falsch');
-(autoFixture.stats.vetoed.length === 1 && autoFixture.stats.vetoed[0] === 'veto-me') ? ok('Veto-Liste greift, "_"-Kommentare zaehlen nicht als ID') : fail('Veto-Liste falsch: ' + JSON.stringify(autoFixture.stats.vetoed));
+(autoFixture.stats.vetoed.length === 1 && autoFixture.stats.vetoed[0] === 'veto-me') ? ok('Veto-Liste greift, "_"-Kommentare zählen nicht als ID') : fail('Veto-Liste falsch: ' + JSON.stringify(autoFixture.stats.vetoed));
 (autoFixture.stats.unresolved.length === 1 && autoFixture.stats.unresolved[0].startsWith('no-proto'))
   ? ok('unresolved statt raten (kein Protokoll)') : fail('unresolved falsch: ' + JSON.stringify(autoFixture.stats.unresolved));
 const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
@@ -181,6 +181,32 @@ const emptyOk = emptyRoutes.ok
 emptyOk ? ok('leere Route wird aus dem Snapshot bedient (kein "resolves no models", gesunde Gruppen bleiben live)')
   : fail('Leer-Routen-Gurt greift nicht: ' + JSON.stringify(emptyRoutes.stats));
 
+// Gurt 3b (Re-Review-Befund 1): der Snapshot-Rückfall darf keine ID in eine
+// ZWEITE Route legen, die live schon anderswo einsortiert ist — sonst stünde
+// dasselbe Modell unter zwei Protokollen im Picker, und eines davon scheitert
+// zur Laufzeit. Der Zustand wäre selbst-erhaltend (--adopt schreibt ihn fest).
+const dupSnapshot = {
+  routes: {
+    'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [{ id: 'snap-ex', name: 'Snap Ex', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+    'opencode-go-responses': { api: 'openai-responses', baseURL: 'https://x/v1', displayName: 'responses', models: [{ id: 'mover', name: 'Mover', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'mover', name: 'Mover', contextWindow: 10, maxTokens: 5, input: ['text'] }, { id: 'snap-msg', name: 'Snap Msg', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+  },
+};
+const dup = buildAutoCatalog({
+  snapshot: dupSnapshot,
+  registryModels: { mover: { id: 'mover', name: 'Mover', limit: { context: 1, output: 1 }, modalities: { input: ['text'] } } },
+  roster: ['mover'],
+  protocols: { mover: 'openai-responses' }, // live jetzt responses -> messages bleibt leer
+  cfg: { minAutoModels: 1, minAutoRatio: 0 },
+});
+const dupIds = Object.values(dup.routes ?? {}).flatMap((r) => r.models.map((m) => m.id));
+const dupOk = dup.ok
+  && dupIds.filter((x) => x === 'mover').length === 1
+  && dup.routes['opencode-go-responses'].models.some((m) => m.id === 'mover')
+  && dup.routes['opencode-go-messages'].models.map((m) => m.id).join(',') === 'snap-msg';
+dupOk ? ok('Snapshot-Rückfall filtert bereits platzierte IDs (kein Modell unter zwei Protokollen)')
+  : fail('Doppel-ID im Rückfall: ' + JSON.stringify({ ok: dup.ok, ids: dupIds, messages: dup.routes?.['opencode-go-messages']?.models?.map((m) => m.id) }));
+
 // Gurt 2 (Review-Befund 5): degradierte Quelle -> verweigern statt halben Picker leeren.
 const thin = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 1, minAutoRatio: 5 } });
 (!thin.ok && /minAutoRatio/.test(thin.reason ?? '')) ? ok('Verhältnis-Gurt: dünne Quelle -> Auto verweigert (minAutoRatio)') : fail('minAutoRatio-Gurt greift nicht: ' + JSON.stringify(thin.reason));
@@ -201,7 +227,7 @@ if (fs.existsSync(cacheFile('registry.json')) && fs.existsSync(cacheFile('roster
   console.log(`   Snapshot: ${total} | live: ${live.stats.members} | neu: ${live.stats.added.length} | weg: ${live.stats.removed.length} | unresolved: ${live.stats.unresolved.length}`);
   if (live.stats.added.length || live.stats.removed.length) console.log('   Hinweis: Drift ist normal (Live bewegt sich) — "node bin/sync.mjs --adopt" zieht nach.');
 } else {
-  console.log('   (uebersprungen: kein catalog/.cache vorhanden)');
+  console.log('   (übersprungen: kein catalog/.cache vorhanden)');
 }
 
 console.log(failures ? `\nERGEBNIS: ${failures} Fehler` : '\nERGEBNIS: alles grün');
