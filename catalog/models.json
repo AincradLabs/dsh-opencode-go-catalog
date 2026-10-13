@@ -1,13 +1,13 @@
 {
-  "generated": "2026-10-11",
-  "policy": "Nur live-verifizierte IDs (Stand 2026-10-10). Keine geratenen Kapazitäten: fehlt ein Wert im Registry, steht needsReview:true und bin/sync.mjs meldet ihn statt zu raten. Die eingebaute opencode-go-Route bleibt unberührt; diese Datei beschreibt NUR die drei Sibling-Routen.",
+  "generated": "2026-10-13",
+  "policy": "Dieser Snapshot ist der OFFLINE-RUECKFALL und die Routen-Definition (api/baseURL/displayName). Im Normalbetrieb baut das Plugin die Mitgliedschaft bei jedem Sync frisch aus Live-Roster (https://opencode.ai/zen/go/v1/models) + Protokoll-Orakel (Doku-Endpoint-Tabelle) — neue Modelle erscheinen ohne Handarbeit, abgekuendigte fallen raus. Kapazitaeten werden NIE geraten: fehlt ein Wert im Registry, bleibt ein hier verifizierter Wert stehen, sonst wird das Feld weggelassen (llm-pi-ai setzt dann 262144/32768) plus needsReview. Die eingebaute opencode-go-Route bleibt unberuehrt; diese Datei beschreibt NUR die drei Sibling-Routen.",
   "sources": [
     "https://opencode.ai/docs/go/",
     "https://models.dev/providers/opencode-go",
     "https://models.opencode.ai/api.json",
     "https://opencode.ai/zen/go/v1/models"
   ],
-  "protocolNote": "Protokollzuordnung am 2026-10-10 gegen die Endpoint-Tabelle in https://opencode.ai/docs/go/ kalibriert (responses/messages/chat-completions). Der Gateway-Endpunkt nennt das Protokoll NICHT — neue Modelle vor dem Einsortieren gegen beide Endpunkte proben (chat/completions-Fehlversuch = 500 bzw. 401 'not supported for format oa-compat', responses-Fehlversuch analog). Falsch einsortiert = Request scheitert zur Laufzeit.",
+  "protocolNote": "Protokollquelle ist die Endpoint-Tabelle in https://opencode.ai/docs/go/ (Model ID -> /go/v1/chat/completions|responses|messages), ausgewertet von lib/protocols.mjs. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprueche zu diesem Snapshot. Der Gateway nennt das Protokoll in keinem JSON — eine ID ohne Doku-Zeile bleibt unresolved und wird gemeldet, nie geraten (falsch einsortiert = Request scheitert zur Laufzeit mit 500 bzw. 401 'not supported for format oa-compat'). Der MITGELIEFERTE pi-ai-Katalog ist als Orakel untauglich: er widerspricht der Doku bei minimax-m2.7, qwen3.7-plus und qwen3.8-max.",
   "routes": {
     "opencode-go-extras": {
       "api": "openai-completions",
@@ -15,18 +15,33 @@
       "displayName": "OpenCode Go (extras)",
       "models": [
         {
-          "id": "step-5-preview-free",
-          "name": "Step 5 Preview Free",
-          "contextWindow": 1000000,
-          "maxTokens": 65536,
+          "id": "cat-jam-free",
+          "name": "Cat Jam Free",
+          "contextWindow": 262144,
+          "maxTokens": 131072,
           "input": [
-            "text",
-            "image"
+            "text"
           ],
           "reasoningEfforts": {
             "low": "low",
             "medium": "medium",
-            "high": "high"
+            "high": "high",
+            "xhigh": "xhigh",
+            "max": "max"
+          }
+        },
+        {
+          "id": "deepseek-v4-flash",
+          "name": "DeepSeek V4 Flash",
+          "contextWindow": 1000000,
+          "maxTokens": 384000,
+          "input": [
+            "text"
+          ],
+          "reasoningEfforts": {
+            "low": "low",
+            "high": "high",
+            "max": "max"
           }
         },
         {
@@ -40,6 +55,47 @@
           ],
           "reasoningEfforts": {
             "low": "low",
+            "high": "high",
+            "max": "max"
+          }
+        },
+        {
+          "id": "deepseek-v4-pro",
+          "name": "DeepSeek V4 Pro (New)",
+          "contextWindow": 1000000,
+          "maxTokens": 384000,
+          "input": [
+            "text"
+          ],
+          "reasoningEfforts": {
+            "high": "high",
+            "max": "max"
+          }
+        },
+        {
+          "id": "deepseek-v4.1-flash",
+          "name": "DeepSeek V4.1 Flash",
+          "contextWindow": 1000000,
+          "maxTokens": 384000,
+          "input": [
+            "text",
+            "image"
+          ],
+          "reasoningEfforts": {
+            "low": "low",
+            "high": "high",
+            "max": "max"
+          }
+        },
+        {
+          "id": "glm-5.2",
+          "name": "GLM-5.2",
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "input": [
+            "text"
+          ],
+          "reasoningEfforts": {
             "high": "high",
             "max": "max"
           }
@@ -74,6 +130,66 @@
           }
         },
         {
+          "id": "hy3",
+          "name": "Hy3",
+          "contextWindow": 256000,
+          "maxTokens": 128000,
+          "input": [
+            "text"
+          ],
+          "reasoningEfforts": {
+            "off": "none",
+            "low": "low",
+            "high": "high"
+          }
+        },
+        {
+          "id": "hy4-preview",
+          "name": "Hy4 preview",
+          "contextWindow": 1024000,
+          "maxTokens": 64000,
+          "input": [
+            "text"
+          ],
+          "reasoningEfforts": {
+            "off": "none",
+            "high": "high"
+          }
+        },
+        {
+          "id": "kimi-k2.6",
+          "name": "Kimi K2.6",
+          "contextWindow": 262144,
+          "maxTokens": 65536,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "kimi-k2.7-code",
+          "name": "Kimi K2.7 Code",
+          "contextWindow": 262144,
+          "maxTokens": 262144,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "kimi-k3",
+          "name": "Kimi K3",
+          "contextWindow": 1048576,
+          "maxTokens": 131072,
+          "input": [
+            "text",
+            "image"
+          ],
+          "reasoningEfforts": {
+            "max": "max"
+          }
+        },
+        {
           "id": "longcat-2.0",
           "name": "LongCat-2.0",
           "contextWindow": 1000000,
@@ -90,6 +206,25 @@
           "input": [
             "text",
             "image"
+          ]
+        },
+        {
+          "id": "mimo-v2.5",
+          "name": "MiMo V2.5",
+          "contextWindow": 1000000,
+          "maxTokens": 128000,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "mimo-v2.5-pro",
+          "name": "MiMo V2.5 Pro",
+          "contextWindow": 1048576,
+          "maxTokens": 128000,
+          "input": [
+            "text"
           ]
         },
         {
@@ -113,19 +248,6 @@
           ]
         },
         {
-          "id": "hy4-preview",
-          "name": "Hy4 preview",
-          "contextWindow": 1024000,
-          "maxTokens": 64000,
-          "input": [
-            "text"
-          ],
-          "reasoningEfforts": {
-            "off": "none",
-            "high": "high"
-          }
-        },
-        {
           "id": "space-bunny",
           "name": "Space Bunny",
           "contextWindow": 1048576,
@@ -140,6 +262,21 @@
             "high": "high",
             "xhigh": "xhigh",
             "max": "max"
+          }
+        },
+        {
+          "id": "step-5-preview-free",
+          "name": "Step 5 Preview Free",
+          "contextWindow": 1000000,
+          "maxTokens": 65536,
+          "input": [
+            "text",
+            "image"
+          ],
+          "reasoningEfforts": {
+            "low": "low",
+            "medium": "medium",
+            "high": "high"
           }
         }
       ]
@@ -276,6 +413,35 @@
           }
         },
         {
+          "id": "minimax-m2.7",
+          "name": "MiniMax-M2.7",
+          "contextWindow": 204800,
+          "maxTokens": 131072,
+          "input": [
+            "text"
+          ]
+        },
+        {
+          "id": "minimax-m3",
+          "name": "MiniMax-M3",
+          "contextWindow": 1000000,
+          "maxTokens": 131072,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
+          "id": "qwen3.7-plus",
+          "name": "Qwen3.7 Plus",
+          "contextWindow": 1000000,
+          "maxTokens": 65536,
+          "input": [
+            "text",
+            "image"
+          ]
+        },
+        {
           "id": "qwen3.8-flash",
           "name": "Qwen3.8 Flash",
           "contextWindow": 1000000,
@@ -304,28 +470,19 @@
             "medium": "medium",
             "xhigh": "xhigh"
           }
-        },
-        {
-          "id": "qwen3.7-plus",
-          "name": "Qwen3.7 Plus",
-          "contextWindow": 1000000,
-          "maxTokens": 65536,
-          "input": [
-            "text",
-            "image"
-          ]
         }
       ]
     }
   },
-  "deliberatelyExcluded": {
+  "excluded": {
+    "_hinweis": "Veto-Liste: wird vom Auto-Modus respektiert (lib/live.mjs liest 'excluded' UND das alte 'deliberatelyExcluded'). Hier landet nur, was live ist und trotzdem draussen bleiben soll.",
     "glm-5": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
     "kimi-k2.5": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
     "mimo-v2-omni": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
     "mimo-v2-pro": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
     "qwen3.5-plus": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
     "hy3-preview": "In älteren Listen, in keiner Oktober-2026-Quelle verifiziert — sync nimmt sie auf, sobald live.",
-    "space-bunny-free": "Nur auf models.dev, nicht in den Go-Docs — -free-IDs waren historisch Zen-only (401 'not supported'); erst nach Live-Probe aufnehmen.",
-    "minimax-m2.5": "Protokoll nicht verifiziert (m2.7/m3 = messages) — erst nach Live-Probe einsortieren."
+    "space-bunny-free": "Nur auf models.dev, nicht in den Go-Docs — -free-IDs waren historisch Zen-only (401 'not supported'); erst nach Live-Probe aufnehmen. Steht derzeit nicht im Roster, ist also ohnehin draussen.",
+    "minimax-m2.5": "Protokoll nicht verifiziert (m2.7/m3 = messages) und keine Doku-Zeile — erst nach Live-Probe einsortieren."
   }
 }

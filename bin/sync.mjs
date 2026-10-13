@@ -1,26 +1,30 @@
-// bin/sync.mjs — Fresh-Refresh für catalog/models.json aus dem Live-Registry.
+// bin/sync.mjs — Snapshot-Pflege und Auto-Vorschau aus der Live-Lage.
 //
-// Quelle: https://models.opencode.ai/api.json (dasselbe Format wie models.dev,
-// opencode-go-Sektion = exaktes Abo-Roster mit reasoning_options, modalities,
-// limits). Kein Key nötig, kein Secret-Handling.
+// QUELLEN (alle keyless):
+//   https://models.opencode.ai/api.json   Registry: Name, Limits, Modalitaeten,
+//                                         reasoning_options (models.dev-Format)
+//   https://opencode.ai/zen/go/v1/models  Roster: welche IDs es JETZT gibt
+//   https://opencode.ai/docs/go/          Protokoll-Orakel: Endpoint-Tabelle
 //
-// Politik:
-// - Mitgliedschaft bleibt kuratiert: Neue Live-IDs werden GEMELDET, nicht
-//   automatisch einsortiert (Protokoll steht in keinem Endpoint — vor dem
-//   Einsortieren beide Endpunkte proben, siehe catalog/models.json).
-// - Felder (input, limits, reasoningEfforts) werden FRESH überschrieben.
-// - Kapazitäten werden NIE geraten: fehlt ein Wert, bleibt der alte stehen und
-//   das Modell bekommt needsReview:true.
+// PROTOKOLL-OHNE-RATEN: Die frueheren Listen KNOWN_RESPONSES/KNOWN_MESSAGES
+// sind ersetzt. Das Protokoll kommt aus der Doku-Endpoint-Tabelle
+// (lib/protocols.mjs); eine ID ohne Doku-Zeile wird als "PROBEN!" gemeldet und
+// NICHT einsortiert. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprueche zum
+// hand-kalibrierten Snapshot.
 //
-// Gebrauch:
-//   node bin/sync.mjs --dry-run   (Standard: nur Report, schreibt nichts)
-//   node bin/sync.mjs --write      (Felder fresh schreiben + generated-Datum)
-//   node bin/sync.mjs --check      (offline: nur Snapshot-Regeln prüfen)
+// GEBRAUCH:
+//   node bin/sync.mjs                 Dry-run: Feld-Diffs + neue IDs + Protokoll
+//   node bin/sync.mjs --auto          Vorschau: was der Auto-Modus in DSH schreibt
+//   node bin/sync.mjs --write         Felder fresh schreiben + generated-Datum
+//   node bin/sync.mjs --adopt         Live-Mitgliedschaft in den Snapshot uebernehmen
+//   node bin/sync.mjs --check         offline: nur Snapshot-Regeln pruefen
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mapReasoningEfforts, mapInput, mapLimits } from '../lib/reasoning.mjs';
+import { fetchProtocolTable } from '../lib/protocols.mjs';
+import { fetchRoster, buildAutoCatalog } from '../lib/live.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -37,8 +41,8 @@ function checkSnapshot(doc) {
     }
     if (rec.baseURL !== 'https://opencode.ai/zen/go/v1') problems.push(`${route}: baseURL weicht ab`);
     for (const m of rec.models ?? []) {
-      if (!m.id || !m.name || !m.contextWindow || !m.maxTokens || !m.input) {
-        problems.push(`${route}/${m.id ?? '?'}: Pflichtfeld fehlt (id/name/contextWindow/maxTokens/input)`);
+      if (!m.id || !m.name || !m.input) {
+        problems.push(`${route}/${m.id ?? '?'}: Pflichtfeld fehlt (id/name/input)`);
       }
       if (seen.has(m.id)) problems.push(`Doppel-ID: ${m.id}`);
       seen.add(m.id);
@@ -85,7 +89,11 @@ async function main() {
   }
 
   const write = args.has('--write');
-  console.log(write ? 'Modus: --write (Felder fresh schreiben)' : 'Modus: --dry-run (schreibt nichts)');
+  const adopt = args.has('--adopt');
+  const autoPreview = args.has('--auto');
+  console.log(adopt ? 'Modus: --adopt (Live-Mitgliedschaft in den Snapshot)'
+    : autoPreview ? 'Modus: --auto (Vorschau der Auto-Routen, schreibt nichts)'
+      : write ? 'Modus: --write (Felder fresh schreiben)' : 'Modus: --dry-run (schreibt nichts)');
 
   const { data: registry, cached } = await fetchRegistry().catch((e) => {
     console.log(`Registry: FEHLER (${e.message}) — Abbruch ohne Schreibvorgang`);
@@ -94,12 +102,44 @@ async function main() {
   console.log(`Registry: geladen${cached ? ' (304, Cache)' : ''}`);
   const goModels = registry['opencode-go']?.models ?? registry?.providers?.['opencode-go']?.models;
   if (!goModels || typeof goModels !== 'object') {
-    console.log('Registry-Parsing: opencode-go-Sektion nicht gefunden (Format geändert?) — Abbruch');
+    console.log('Registry-Parsing: opencode-go-Sektion nicht gefunden (Format geaendert?) — Abbruch');
     process.exit(1);
   }
   const regIds = new Set(Object.keys(goModels).map((k) => k.split('/').pop()));
   console.log(`Registry: ${regIds.size} opencode-go-IDs`);
 
+  // Live-Roster + Protokoll-Orakel: die beiden Quellen, die der Auto-Modus
+  // auch zur Laufzeit benutzt. Beide keyless, beide mit Last-Good-Cache.
+  const roster = await fetchRoster({}, { cacheDir: CACHE_DIR });
+  const oracle = await fetchProtocolTable({}, { cacheDir: CACHE_DIR, roster: roster.ids });
+  console.log(`Roster: ${roster.ids ? roster.ids.size : 0} IDs (${roster.source})`
+    + ` | Protokoll-Orakel: ${oracle.table ? Object.keys(oracle.table).length : 0} IDs (${oracle.source})`);
+  if (oracle.conflicts?.length) for (const c of oracle.conflicts) console.log('  ! Orakel-Konflikt: ' + c);
+
+  const auto = buildAutoCatalog({
+    snapshot,
+    registryModels: goModels,
+    roster: roster.ids ?? [],
+    protocols: oracle.table ?? {},
+    cfg: {},
+  });
+
+  if (autoPreview) {
+    console.log(`\nAuto-Modus: ${auto.ok ? 'wuerde schreiben' : 'VERWEIGERT'} — ${auto.ok ? auto.stats.members + ' Modelle' : auto.reason}`);
+    for (const [route, n] of Object.entries(auto.stats.perRoute)) console.log(`  ${route}: ${n}`);
+    console.log(`  neu im Picker: ${auto.stats.added.length ? auto.stats.added.join(', ') : '(keine)'}`);
+    console.log(`  faellt raus:   ${auto.stats.removed.length ? auto.stats.removed.join(', ') : '(keine)'}`);
+    if (auto.stats.unresolved.length) {
+      console.log('  unresolved (bleibt draussen, kein Protokoll/Metadaten):');
+      for (const u of auto.stats.unresolved) console.log('    - ' + u);
+    }
+    if (auto.stats.vetoed.length) console.log(`  Veto-Liste: ${auto.stats.vetoed.join(', ')}`);
+    if (auto.stats.needsReview.length) console.log(`  needsReview (Limits fehlen/aus Snapshot): ${auto.stats.needsReview.join(', ')}`);
+    console.log('\nVorschau: nichts geschrieben.');
+    return;
+  }
+
+  // Feld-Diffs fuer die IDs, die im Snapshot stehen und live noch existieren.
   const fieldChanges = [];
   const needsReview = [];
   for (const [route, rec] of Object.entries(snapshot.routes)) {
@@ -116,7 +156,7 @@ async function main() {
         delete m.needsReview;
       } else {
         m.needsReview = true;
-        needsReview.push(`${m.id}: keine Limits im Registry — alte Werte behalten, prüfen!`);
+        needsReview.push(`${m.id}: keine Limits im Registry — alte Werte behalten, pruefen!`);
       }
       m.input = freshInput;
       if (freshEfforts === undefined) delete m.reasoningEfforts;
@@ -128,28 +168,45 @@ async function main() {
   }
 
   const snapIds = new Set(Object.values(snapshot.routes).flatMap((r) => r.models.map((m) => m.id)));
-  const added = [...regIds].filter((id) => !snapIds.has(id)).sort();
+  const added = [...(roster.ids ?? [])].filter((id) => !snapIds.has(id) && regIds.has(id)).sort();
 
   console.log(`\nFeld-Updates: ${fieldChanges.length}`);
   for (const c of fieldChanges) console.log('  ~ ' + c);
-  console.log(`Neu live (nicht im Snapshot — manuell triagieren, NICHT auto-einsortiert): ${added.length ? '' : '(keine)'}`);
-  const KNOWN_RESPONSES = ['grok-4.7', 'grok-4.6', 'gpt-6-luna', 'gpt-5.6-luna', 'muse-spark-1.3-contributor', 'muse-spark-1.2-contributor', 'grok-4.5'];
-  const KNOWN_MESSAGES = ['claude-haiku-5-5', 'minimax-m3', 'minimax-m2.7', 'qwen3.8-max', 'qwen3.8-flash', 'qwen3.7-plus'];
+  console.log(`Neu live (nicht im Snapshot): ${added.length ? '' : '(keine)'}`);
   for (const id of added) {
-    const hint = KNOWN_RESPONSES.includes(id) ? 'responses' : KNOWN_MESSAGES.includes(id) ? 'messages' : 'completions? (PROBEN!)';
-    console.log(`  + ${id}  [${hint}]`);
+    const api = oracle.table?.[id];
+    console.log(`  + ${id}  [${api ?? 'PROBEN! (keine Doku-Zeile)'}]`);
   }
   if (needsReview.length) {
-    console.log('Prüffälle:');
+    console.log('Prueffaelle:');
     for (const n of needsReview) console.log('  ! ' + n);
   }
+  const gone = [...snapIds].filter((id) => !(roster.ids ?? new Set()).has(id)).sort();
+  if (gone.length) console.log(`Nicht mehr live (Auto-Modus wirft sie raus): ${gone.join(', ')}`);
 
-  if (write) {
+  if (adopt) {
+    if (!auto.ok) {
+      console.log(`\n--adopt nicht moeglich: ${auto.reason}`);
+      process.exit(1);
+    }
+    const stamp = new Date().toISOString().slice(0, 10);
+    snapshot.routes = auto.routes;
+    if (auto.stats.removed.length) {
+      snapshot.retired = { ...(snapshot.retired ?? {}) };
+      for (const id of auto.stats.removed) snapshot.retired[id] = `nicht mehr im Live-Roster (${stamp})`;
+    }
+    snapshot.generated = stamp;
+    fs.writeFileSync(SNAPSHOT, JSON.stringify(snapshot, null, 2) + '\n');
+    console.log(`\nSnapshot uebernommen: ${auto.stats.members} Modelle`
+      + (auto.stats.added.length ? `, +${auto.stats.added.join(' +')}` : '')
+      + (auto.stats.removed.length ? `, -${auto.stats.removed.join(' -')}` : '')
+      + ` -> ${SNAPSHOT}`);
+  } else if (write) {
     snapshot.generated = new Date().toISOString().slice(0, 10);
     fs.writeFileSync(SNAPSHOT, JSON.stringify(snapshot, null, 2) + '\n');
     console.log('\nSnapshot geschrieben: ' + SNAPSHOT);
   } else {
-    console.log('\nDry-run: nichts geschrieben. Mit --write übernehmen.');
+    console.log('\nDry-run: nichts geschrieben. Mit --write (Felder) oder --adopt (Mitgliedschaft) uebernehmen.');
   }
 }
 

@@ -1,9 +1,10 @@
 # dsh-opencode-go-catalog
 
-A self-maintained OpenCode Go model catalog for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
-(DSH). Versioned snapshot, refresh on command, on/off switch — full control, no upstream waiting.
+A live-maintained OpenCode Go model catalog for [DeepSeek Harness](https://github.com/deepseek-ai/deepseek-harness)
+(DSH). Membership is rebuilt from the live roster plus the docs endpoint table on every sync — new
+models appear, retired ones drop out, no hand work. A curated snapshot stays as the offline fallback.
 
-**Status:** 0.1.0 · 19 models · snapshot 2026-10-11, incl. **Step 5 Preview Free** (`step-5-preview-free`)
+**Status:** 0.2.0 · auto membership · 33 models live (2026-10-13), incl. **Cat Jam Free** (`cat-jam-free`)
 
 ## Contents
 
@@ -13,6 +14,7 @@ A self-maintained OpenCode Go model catalog for [DeepSeek Harness](https://githu
 - [Configuration](#configuration)
 - [Commands & scripts](#commands--scripts)
 - [Fresh reasoning efforts](#fresh-reasoning-efforts)
+- [The protocol oracle](#the-protocol-oracle)
 - [Maintaining the catalog](#maintaining-the-catalog)
 - [Enable / disable](#enable--disable)
 - [Troubleshooting](#troubleshooting)
@@ -22,9 +24,9 @@ A self-maintained OpenCode Go model catalog for [DeepSeek Harness](https://githu
 
 ## Why
 
-The built-in `opencode-go` catalog in `@deepseek-ai/dsh-llm-pi-ai` is a static build snapshot
-(~16 models at the time of writing) that never refreshes itself — new models like Step 5 are
-missing until upstream bumps the dependency. See
+The built-in `opencode-go` catalog in `@deepseek-ai/pi-ai` is a static build snapshot (30 models at
+the time of writing) that never refreshes itself — new models like Step 5 or Cat Jam are missing
+until upstream bumps the dependency. See
 [Discussion #3957](https://github.com/deepseek-ai/deepseek-harness/discussions/3957).
 
 This plugin never touches the built-in route. It manages three sibling routes through the
@@ -32,26 +34,46 @@ official `settings.mutate` seam:
 
 | Route | Protocol | Examples |
 |---|---|---|
-| `opencode-go-extras` | `openai-completions` | Step 5 Preview Free, GLM-5.3, LongCat-2.0, MiMo-V2.6 |
+| `opencode-go-extras` | `openai-completions` | Cat Jam Free, Step 5 Preview Free, GLM-5.3, LongCat, MiMo, Kimi, DeepSeek |
 | `opencode-go-responses` | `openai-responses` | GPT-5.6/6 Luna, Grok 4.6/4.7, Muse Spark 1.2/1.3 |
-| `opencode-go-messages` | `anthropic-messages` | Claude Haiku 5.5, Qwen3.8 Max/Flash |
+| `opencode-go-messages` | `anthropic-messages` | Claude Haiku 5.5, Qwen3.8, MiniMax M2.7/M3 |
 
 The split is mandatory, not stylistic: some Go models are *Responses-only* (a chat-completions
 request answers with a bare `500` or `401 "not supported for format oa-compat"`), others are
 *Messages-only*. One route = one protocol.
 
+**Why not put the extra models on the built-in route?** Source-verified against `dsh-llm-pi-ai`:
+`resolveRouteModels` computes a model's protocol as `request.api ?? base?.api ?? routeApi` — an
+`api` field *on a model entry* is never read. A model the shipped catalog does not describe
+therefore needs the **route-level** `api`, and setting that routes `opencode-go` through
+`createProvider()` over a *single* protocol (the catalog provider is only reused while
+`spec.api === undefined`), losing both the three-protocol dispatch and pi-ai's session-header
+wrapper. On top of that, any `models` list *replaces* the served catalog. The built-in route stays
+untouched.
+
 ## How it works
 
-1. `catalog/models.json` is the curated snapshot (protocol-separated, capacities verified).
-2. On startup, on an interval (default 4 h), and on `/opencode-go-sync`, the host module
-   refreshes `input` / `limits` / `reasoningEfforts` from the live registry
-   (`https://models.opencode.ai/api.json`, ETag cache + last-good fallback) and writes the
-   three sibling routes via `settings.mutate` (change-only).
-3. Membership stays curated: newly appeared live IDs are *reported*, never auto-sorted into a
-   route — no endpoint discloses the wire protocol, and a wrong guess fails at request time.
-4. The module never throws during boot (degrades to a warning + a ready-to-paste YAML block),
-   never edits `node_modules`, and never reads or writes credentials (it only references the
-   `OPENCODE_GO_API_KEY` name, same as the built-in route).
+1. **Registry** — `https://models.opencode.ai/api.json` (keyless, ETag cache + last-good fallback)
+   supplies name, limits, input modalities, and `reasoning_options` per model.
+2. **Roster** — `https://opencode.ai/zen/go/v1/models` (keyless) says which IDs exist *right now*.
+3. **Protocol oracle** — `https://opencode.ai/docs/go/` carries an endpoint table per model ID
+   (`…/go/v1/chat/completions`, `/responses`, `/messages`). See
+   [The protocol oracle](#the-protocol-oracle).
+4. Membership is then `roster ∩ registry ∩ protocol-known`, minus the veto list. On startup, on an
+   interval (default 4 h), and on `/opencode-go-sync` the three sibling routes are written via
+   `settings.mutate`.
+5. **Fail-safe:** if the roster or the oracle is unavailable, the curated snapshot in
+   `catalog/models.json` is served unchanged. A network outage or a docs redesign can never empty
+   the picker. Missing capacities are never invented — the field is omitted and `needsReview` is
+   reported, so `llm-pi-ai` applies its own route defaults (262144 / 32768).
+6. The module never throws during boot, never edits `node_modules`, and never reads or writes
+   credentials (it only references the `OPENCODE_GO_API_KEY` name, same as the built-in route).
+
+**Hand-added models do not survive.** `settings.mutate` persists into the profile's
+`cordis.patch.yml`, and each sibling route is written as one whole object. A model you add by hand
+(or via Settings → Models → *Fetch available models* → *Add model*) inside one of these three routes
+is gone at the next sync — startup, interval, or `/opencode-go-sync`. Durable entries belong in the
+snapshot (`node bin/sync.mjs --adopt`) or in the veto list.
 
 ## Installation
 
@@ -62,9 +84,9 @@ Prerequisites: DSH running, an OpenCode Go subscription with a working key
 `dsh-opencode-go-catalog` → one-click install → restart → open the model picker.
 Expect three new groups (*OpenCode Go extras / responses / messages*) next to the built-in one.
 
-**Manual** (until listed): copy this folder to
-`<profile>/node_modules/dsh-opencode-go-catalog`, add `"dsh-opencode-go-catalog"` to
-`dsh.profile.bundles` in the profile `package.json` (keep a backup first), restart DSH.
+**Manual**: copy this folder to `<profile>/node_modules/dsh-opencode-go-catalog`, add
+`"dsh-opencode-go-catalog"` to `dsh.profile.bundles` in the profile `package.json` (keep a backup
+first), restart DSH.
 
 **Without the plugin** (static, no auto-refresh): generate the snippet and replace your
 `llm-pi-ai` row with it — see [INSTALL.md](INSTALL.md) and [weg-a-schnellstart.yml](weg-a-schnellstart.yml):
@@ -82,6 +104,9 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
   name: dsh-opencode-go-catalog
   config:
     enabled: true            # false → sibling routes are removed again
+    autoMembership: true     # false → curated snapshot only, no roster/oracle
+    minAutoModels: 8         # safety belt: below this the snapshot is served
+    minProtocolRows: 10      # safety belt against a docs redesign
     refreshReasoning: true   # false → use snapshot file values only, no network
     sessionHeaderValue: 'dsh-opencode-go-catalog'  # false → no static session header (400 risk)
     intervalMinutes: 240     # 0 → startup only
@@ -98,17 +123,19 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
 
 | Command | Effect |
 |---|---|
-| `/opencode-go-sync` (chat) | Immediate rewrite from snapshot + live registry. Registered through `ctx.root` into the global command layer, so it appears in the `/` menu for every session (registering through the plugin fiber context lands outside all agent scope chains: self-probe green, menu empty — fixed in 0.1.4) |
-| `node bin/sync.mjs --dry-run` (default) | Report: field diffs, new live IDs, stale candidates — writes nothing |
+| `/opencode-go-sync` (chat) | Immediate rewrite from the live sources. Registered through `ctx.root` into the global command layer, so it appears in the `/` menu for every session (registering through the plugin fiber context lands outside all agent scope chains: self-probe green, menu empty — fixed in 0.1.4) |
+| `node bin/sync.mjs` (default) | Report: field diffs, new live IDs with their protocol, dead IDs — writes nothing |
+| `node bin/sync.mjs --auto` | Preview exactly what the auto mode would publish (per route, added, removed, unresolved) |
+| `node bin/sync.mjs --adopt` | Write the live membership into the snapshot (fallback stays current) |
 | `node bin/sync.mjs --write` | Rewrite snapshot fields from the registry + stamp the date |
 | `node bin/sync.mjs --check` | Offline snapshot rule check |
 | `node bin/snippet.mjs` | Print the complete `llm-pi-ai` replacement row for manual installs |
-| `node verify.mjs` | Manifest + patch shape + catalog rules (offline) |
+| `node verify.mjs` | Manifest + patch shape + catalog rules + fixture tests for oracle and auto builder (offline) |
 
 ## Fresh reasoning efforts
 
-`reasoning_options` in the live registry are structured (`effort` values, `toggle`,
-`budget_tokens`) — Models.dev serves the same data. Mapping rules ([lib/reasoning.mjs](lib/reasoning.mjs)):
+`reasoning_options` in the live registry are structured (`effort` values, `toggle`, `budget_tokens`)
+— Models.dev serves the same data. Mapping rules ([lib/reasoning.mjs](lib/reasoning.mjs)):
 
 | Registry | pi-ai `reasoningEfforts` |
 |---|---|
@@ -118,38 +145,41 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
 | `toggle` + `effort` combined | `effort` wins |
 | `modalities.input` containing `image` | `input: [text, image]` (pi-ai only knows `text`/`image`; `video`/`audio`/`pdf` are dropped documented) |
 
-Live examples: Step 5 Preview Free → `{low, medium, high}`; GPT-5.6 Luna →
+Live examples: Cat Jam Free → `{low, medium, high, xhigh, max}`; GPT-5.6 Luna →
 `{off: none, low…max}`; Muse Spark → `{minimal…xhigh}` (no `max`!); LongCat-2.0 /
-MiniMax M3 (`toggle`-only) → no menu.
+MiniMax M2.5 (`toggle`-only) → no menu.
+
+## The protocol oracle
+
+No JSON endpoint discloses the wire protocol. The docs endpoint table does, per model ID, and it is
+the same table the hand-calibrated snapshot was verified against:
+
+| Source | Verdict |
+|---|---|
+| `https://opencode.ai/docs/go/` endpoint table | **oracle** — 33 rows on 2026-10-13 |
+| Hand-calibrated snapshot | 0 conflicts with the table |
+| Shipped pi-ai catalog (`data/opencode-go.json`) | **not usable** — contradicts the table on `minimax-m2.7`, `qwen3.7-plus`, `qwen3.8-max` |
+
+`lib/protocols.mjs` parses the table (`htmlToText` + one row regex) and filters every hit against
+the live roster, so a regex false positive can never invent a model ID. An ID without a table row is
+**not guessed** — it is reported as `unresolved` in `status.json` and stays out. Current examples:
+`qwen3.6-plus`, `qwen3.7-max` (live and in the registry, but undocumented), `deepseek-flash`,
+`glm-5.1`, `omen-alpha` (roster-only, no metadata at all).
+
+If the page stops yielding at least `minProtocolRows` rows, the table is treated as unavailable and
+the snapshot is served.
 
 ## Maintaining the catalog
 
-1. Run `node bin/sync.mjs --dry-run`.
-2. Take `~` field updates straight away with `--write` — they come 1:1 from the registry.
-3. Triage `+` IDs by hand (this includes built-in catalog models our snapshot deliberately
-   doesn't duplicate — genuinely new are IDs in neither place). Probe both endpoints before
-   sorting a newcomer into a route, then adopt with `--write`.
+Normally nothing: the auto mode is the maintenance. The snapshot only needs attention when you want
+to pin something or keep the fallback current:
+
+1. `node bin/sync.mjs --auto` — see what the live sources currently produce.
+2. `node bin/sync.mjs --adopt` — take the live membership into `catalog/models.json` (also moves
+   vanished IDs into `retired`). Run it after a model appears or disappears, so an offline start
+   serves the same list.
+3. To keep a live model *out* of the picker, list it in `excluded` with a reason.
 4. `node verify.mjs` → `/opencode-go-sync`.
-
-Deliberately excluded (unverified Oct 2026, see `deliberatelyExcluded` in the snapshot):
-`glm-5`, `kimi-k2.5`, `mimo-v2-omni/pro`, `qwen3.5-plus`, `hy3-preview`,
-`space-bunny-free`, `minimax-m2.5`.
-
-## Session header (MissingSessionID-400)
-
-OpenCode Go requires `x-opencode-session` (stable per-conversation ID) since 09/05 —
-see [Discussion #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495).
-pi-ai attaches it only inside its own `opencode-go` provider module; hand-declared
-routes are rebuilt "from parts" without that wrapper, so their requests fail with
-`400 MissingSessionID` (telemetry: Spark path 74–90% coverage, everything else ~0%).
-
-Until the adapter learns per-conversation `sessionHeader`, this plugin therefore sets
-a **static** header on every sibling route (`sessionHeaderValue`, default
-`'dsh-opencode-go-catalog'`, off with `false`). Trade-off, stated plainly: one fixed
-ID across all conversations means fewer cache hits — slower and pricier than a proper
-per-conversation ID (user-verified). It beats a hard `400`. The built-in `opencode-go`
-route is never touched (its working Spark path stays as is). Remove the workaround the
-day the adapter ships `sessionHeader` support (upstream: `earendil-works/pi#9326`).
 
 ## Enable / disable
 
@@ -158,25 +188,49 @@ day the adapter ships `sessionHeader` support (upstream: `earendil-works/pi#9326
   [cordis.patch.yml](cordis.patch.yml) as the template) to your profile patch with
   `enabled: false`. The three routes are removed again via unset ops; the built-in
   `opencode-go` route keeps running untouched.
+- **Auto mode off, curated snapshot on:** `autoMembership: false`.
 - **Whole plugin off:** `disabled: true` on the bundle row (or the market's disable
   list), restart. Nothing needs deleting.
 
+## Session header (MissingSessionID-400)
+
+OpenCode Go requires `x-opencode-session` (stable per-conversation ID) since 09/05 —
+see [Discussion #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495).
+
+Refined 2026-10-13, source-verified: `dsh-llm-pi-ai` **does** forward a per-conversation id
+(`…options.sessionId === void 0 ? {} : { sessionId: String(options.sessionId) }`), and pi-ai's
+catalog provider wraps its APIs with `withOpenCodeSessionHeader`, which reads exactly that
+`sessionId`. The gap is narrower than "the adapter has no sessionHeader": **hand-declared routes
+never pass through that wrapper**, because `createProvider` calls the raw protocol factory. So a
+sibling route still needs the static header below.
+
+Until a declared route can opt into the wrapper, this plugin sets a **static** header on every
+sibling route (`sessionHeaderValue`, default `'dsh-opencode-go-catalog'`, off with `false`).
+Trade-off, stated plainly: one fixed ID across all conversations means fewer cache hits — slower and
+pricier than a proper per-conversation ID (user-verified). It beats a hard `400`. The built-in
+`opencode-go` route is never touched (it gets the real per-conversation header from pi-ai itself).
+Upstream: `earendil-works/pi#9326` — the ask is "apply `withOpenCodeSessionHeader` to declared
+routes too", not "add sessionId to the adapter".
+
 ## Diagnostics
 
-After every sync attempt the plugin writes `status.json` next to `package.json`
-(time, ok, via, changed, command registration, fetch source, error). Open it in any
-editor — no log access needed. If the picker stays empty, send this file's content
-with your report.
+After every sync attempt the plugin writes `status.json` next to `package.json` (time, ok, via,
+changed, command, fetch, error, and for auto mode: `roster`/`protocols` source, `members`,
+`perRoute`, `added`, `removed`, `unresolved`, `vetoed`, `needsReview`). Open it in any editor — no
+log access needed. If the picker stays empty, send this file's content with your report.
 
 ## Troubleshooting
 
 | Symptom | Cause | Fix |
 |---|---|---|
-| Model answers `500` / `401 not supported for format` | Wrong protocol (e.g. Responses-only model on a completions route) | Move it to the correct sibling route |
+| New model missing from the picker | Not in the roster, or no protocol row in the docs table | Check `status.json` → `auto.unresolved`; a live-but-undocumented model needs a probe before it can be adopted |
+| Model disappeared after a restart | It was added by hand to one of the three managed routes | Durable entries go into the snapshot (`--adopt`) or the veto list |
+| Model answers `500` / `401 not supported for format` | Wrong protocol (e.g. a Responses-only model on a completions route) | Fix the oracle source or move it in the snapshot; `--auto` shows the current assignment |
+| Picker suddenly much smaller | Roster/oracle unreachable and the snapshot is stale | `status.json` → `fetch`/`auto`; run `node bin/sync.mjs --adopt` while online |
 | `model '…' needs an api` | Hand-declared route without `api` | Set `api` + `baseURL` + non-empty `models` (the plugin does this automatically) |
 | Images rejected before sending | `input` is `[text]` | Set `input: [text, image]` per model (only with proven vision support) |
 | No effort menu | `reasoningEfforts` missing | Adopt from the registry's `reasoning_options`; mind `off: none` vs empty `off` |
-| `400 MissingSessionID` | Gateway needs `x-opencode-session`, adapter sends it only on catalog routes | Plugin sets a static one per sibling route (see above); per-conversation fix needs an adapter update |
+| `400 MissingSessionID` | Gateway needs `x-opencode-session`, declared routes get no wrapper | Plugin sets a static one per sibling route (see above) |
 | Installed but seemingly idle | — | This plugin uses no shell hooks; check `status.json` next to `package.json` |
 | Install gate refuses | Peer range with stable lower bound | Not applicable here (no `@deepseek-ai/dsh*` peers declared on purpose) |
 
@@ -187,16 +241,16 @@ update discards it silently. This snapshot is the place.
 
 - **No secrets:** the plugin never reads, writes, logs, or ships credentials. `OPENCODE_GO_API_KEY`
   appears only as a *name reference*, exactly like the built-in route. Verified by pre-commit sweep.
-- **Network:** only two public, keyless JSON endpoints
-  (`models.opencode.ai/api.json`, `opencode.ai/zen/go/v1/models`), with timeout + ETag cache +
-  offline fallback to snapshot values.
+- **Network:** only three public, keyless endpoints (`models.opencode.ai/api.json`,
+  `opencode.ai/zen/go/v1/models`, `opencode.ai/docs/go/`), each with timeout + cache + offline
+  fallback to snapshot values.
 - **Zero dependencies**, no `@deepseek-ai/dsh*` peers (the install gate cannot refuse it),
   no shell hooks, fail-safe boot.
 
 ## Compatibility
 
-Built against DSH `0.2.0-rc.2` behavior (static pi-ai catalog, `settings.mutate` seam,
-optional command registry). Pure ESM, Node ≥ 18.
+Built against DSH `0.2.0-rc.2` behavior (static pi-ai catalog, `settings.mutate` seam, optional
+command registry). Pure ESM, Node ≥ 18.
 
 ## License & sources
 
@@ -206,5 +260,6 @@ MIT — see [LICENSE](LICENSE).
 - [OpenCode Go on Models.dev](https://models.dev/providers/opencode-go) (context/output/pricing)
 - [Step 5 Preview](https://www.stepfun.com/step-5-preview) · [Step 5 API docs](https://platform.stepfun.ai/docs/en/guides/models/step-5-preview)
 - [Discussion #3957](https://github.com/deepseek-ai/deepseek-harness/discussions/3957) (stale-catalog root cause)
+- [Discussion #5495](https://github.com/deepseek-ai/deepseek-harness/discussions/5495) (session header)
 - [Plugin authoring (dsh.pub)](https://dsh.pub/develop-plugin.md) · [Config & publishing](https://deepseekdocs.com/en/docs/learn/dev/config-publish)
 - Live roster: `https://opencode.ai/zen/go/v1/models` · Registry: `https://models.opencode.ai/api.json`

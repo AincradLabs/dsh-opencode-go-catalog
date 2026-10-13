@@ -6,6 +6,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateReasoningEfforts } from './lib/reasoning.mjs';
+import { parseProtocolTable } from './lib/protocols.mjs';
+import { buildAutoCatalog } from './lib/live.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.');
 let failures = 0;
@@ -21,9 +23,12 @@ const pkg = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8'))
 (pkg.dsh?.bundle?.patch === './cordis.patch.yml' && must(path.join(ROOT, 'cordis.patch.yml')))
   ? ok('dsh.bundle.patch zeigt auf existierende Datei') : fail('dsh.bundle.patch fehlt/falsch');
 for (const f of (pkg.files ?? [])) {
-  if (['lib/index.js', 'lib/reasoning.mjs', 'bin/sync.mjs', 'bin/snippet.mjs', 'cordis.patch.yml', 'catalog/models.json', 'weg-a-schnellstart.yml', 'verify.mjs', 'README.md', 'INSTALL.md', 'LICENSE'].includes(f)) {
+  if (['lib/index.js', 'lib/reasoning.mjs', 'lib/protocols.mjs', 'lib/live.mjs', 'bin/sync.mjs', 'bin/snippet.mjs', 'cordis.patch.yml', 'catalog/models.json', 'weg-a-schnellstart.yml', 'verify.mjs', 'README.md', 'INSTALL.md', 'LICENSE'].includes(f)) {
     must(path.join(ROOT, f)) ? ok('files enthält vorhandenes ' + f) : null;
   }
+}
+for (const f of ['lib/protocols.mjs', 'lib/live.mjs']) {
+  (pkg.files ?? []).includes(f) ? ok('files enthält ' + f + ' (sonst fehlt das Modul in der Installation)') : fail('files muss ' + f + ' enthalten');
 }
 if (pkg.dependencies && Object.keys(pkg.dependencies).length) fail('soll zero-dep sein, hat dependencies');
 else ok('zero-dep (keine dependencies)');
@@ -80,6 +85,83 @@ else fail('Snapshot darf opencode-go NICHT enthalten');
 console.log(`   Snapshot gesamt: ${total} Modelle auf ${Object.keys(routes).length} Routen`);
 if (!seen.has('step-5-preview-free')) fail('step-5-preview-free fehlt — Hauptgrund des Plugins!');
 else ok('step-5-preview-free enthalten');
+
+console.log('== lib/protocols.mjs (Protokoll-Orakel, Fixture offline) ==');
+const FIXTURE = `<table>
+<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
+<tr><td>Grok 4.7</td><td>grok-4.7</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>
+<tr><td>Claude Haiku 5.5</td><td>claude-haiku-5-5</td><td>https://opencode.ai/inference/go/v1/messages</td><td>@ai-sdk/anthropic</td></tr>
+<tr><td>Nicht live</td><td>not-in-roster</td><td>https://opencode.ai/inference/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
+</table>`;
+const fixRoster = new Set(['cat-jam-free', 'grok-4.7', 'claude-haiku-5-5']);
+const parsed = parseProtocolTable(FIXTURE, { roster: fixRoster });
+(parsed.table['cat-jam-free'] === 'openai-completions') ? ok('chat/completions -> openai-completions') : fail('cat-jam-free falsch gemappt: ' + parsed.table['cat-jam-free']);
+(parsed.table['grok-4.7'] === 'openai-responses') ? ok('responses -> openai-responses') : fail('grok-4.7 falsch gemappt');
+(parsed.table['claude-haiku-5-5'] === 'anthropic-messages') ? ok('messages -> anthropic-messages') : fail('claude-haiku-5-5 falsch gemappt');
+(!('not-in-roster' in parsed.table) && parsed.ignored.some((i) => i.includes('not-in-roster')))
+  ? ok('Roster-Filter wirft Fremd-IDs weg (Regex-Fehltreffer erreichen keine Route)')
+  : fail('Roster-Filter greift nicht');
+const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>', { roster: fixRoster });
+(conflict.conflicts.length === 1 && conflict.table['cat-jam-free'] === 'openai-completions')
+  ? ok('widerspruechliche Doppelzeile wird gemeldet, die erste gilt')
+  : fail('Konflikt-Erkennung greift nicht');
+
+console.log('== lib/live.mjs (Auto-Mitgliedschaft, Fixture offline) ==');
+const snapFixture = {
+  routes: {
+    'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [{ id: 'old-gone', name: 'Old Gone', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
+    'opencode-go-responses': { api: 'openai-responses', baseURL: 'https://x/v1', displayName: 'responses', models: [] },
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [] },
+  },
+  excluded: { 'veto-me': 'Testveto', '_hinweis': 'Kommentar, keine ID' },
+};
+const regFixture = {
+  'a-new': { id: 'a-new', name: 'A New', limit: { context: 111, output: 22 }, modalities: { input: ['text', 'image'] }, reasoning: true, reasoning_options: [{ type: 'effort', values: ['low', 'high'] }] },
+  'veto-me': { id: 'veto-me', name: 'Veto', limit: { context: 1, output: 1 }, modalities: { input: ['text'] } },
+  'no-proto': { id: 'no-proto', name: 'No Proto', limit: { context: 1, output: 1 }, modalities: { input: ['text'] } },
+  'no-meta': { id: 'no-meta', name: 'No Meta' },
+};
+const autoFixture = buildAutoCatalog({
+  snapshot: snapFixture,
+  registryModels: regFixture,
+  roster: ['a-new', 'veto-me', 'no-proto', 'no-meta'],
+  protocols: { 'a-new': 'openai-completions', 'veto-me': 'openai-completions', 'no-meta': 'openai-responses' },
+  cfg: { minAutoModels: 1 }, // Fixture hat nur 1 Mitglied — Gurt unten separat geprueft
+});
+const only = autoFixture.routes['opencode-go-extras'].models;
+(autoFixture.ok && autoFixture.stats.members === 2) ? ok('Mitglied = Roster ∩ Registry ∩ Protokoll (2 von 4: a-new + no-meta)') : fail('Mitgliederzahl falsch: ' + autoFixture.stats.members);
+(only.length === 1 && only[0].id === 'a-new' && only[0].contextWindow === 111 && only[0].maxTokens === 22) ? ok('Registry-Felder landen im Eintrag') : fail('Eintrag falsch aufgebaut');
+(JSON.stringify(only[0].input) === '["text","image"]') ? ok('Modalitaeten gemappt') : fail('input falsch: ' + JSON.stringify(only[0].input));
+(JSON.stringify(only[0].reasoningEfforts) === '{"low":"low","high":"high"}') ? ok('reasoningEfforts gemappt') : fail('reasoningEfforts falsch');
+const noLimits = autoFixture.routes['opencode-go-responses'].models[0];
+(noLimits?.id === 'no-meta' && noLimits.contextWindow === undefined && noLimits.needsReview === true)
+  ? ok('fehlende Limits werden NICHT erfunden (Feld weg + needsReview -> llm-pi-ai-Defaults)')
+  : fail('Limit-Regel verletzt: ' + JSON.stringify(noLimits));
+(autoFixture.stats.added.includes('a-new') && autoFixture.stats.removed.includes('old-gone')) ? ok('added/removed korrekt gemeldet') : fail('added/removed falsch');
+(autoFixture.stats.vetoed.length === 1 && autoFixture.stats.vetoed[0] === 'veto-me') ? ok('Veto-Liste greift, "_"-Kommentare zaehlen nicht als ID') : fail('Veto-Liste falsch: ' + JSON.stringify(autoFixture.stats.vetoed));
+(autoFixture.stats.unresolved.length === 1 && autoFixture.stats.unresolved[0].startsWith('no-proto'))
+  ? ok('unresolved statt raten (kein Protokoll)') : fail('unresolved falsch: ' + JSON.stringify(autoFixture.stats.unresolved));
+const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
+(!refused.ok) ? ok('Sicherheitsgurt: zu wenige Modelle -> Auto verweigert, Snapshot gilt') : fail('minAutoModels-Gurt greift nicht');
+
+console.log('== Snapshot vs. letzte Live-Erhebung (offline, nur Bericht) ==');
+const cacheFile = (n) => path.join(ROOT, 'catalog', '.cache', n);
+if (fs.existsSync(cacheFile('registry.json')) && fs.existsSync(cacheFile('roster.json')) && fs.existsSync(cacheFile('protocols.json'))) {
+  const reg = JSON.parse(fs.readFileSync(cacheFile('registry.json'), 'utf8'));
+  const goModels = reg['opencode-go']?.models ?? reg?.providers?.['opencode-go']?.models ?? {};
+  const live = buildAutoCatalog({
+    snapshot: doc,
+    registryModels: goModels,
+    roster: JSON.parse(fs.readFileSync(cacheFile('roster.json'), 'utf8')).ids ?? [],
+    protocols: JSON.parse(fs.readFileSync(cacheFile('protocols.json'), 'utf8')).table ?? {},
+    cfg: {},
+  });
+  live.ok ? ok(`Auto-Modus rechnet mit der letzten Erhebung: ${live.stats.members} Modelle`) : fail('Auto-Modus verweigert gegen die letzte Erhebung: ' + live.reason);
+  console.log(`   Snapshot: ${total} | live: ${live.stats.members} | neu: ${live.stats.added.length} | weg: ${live.stats.removed.length} | unresolved: ${live.stats.unresolved.length}`);
+  if (live.stats.added.length || live.stats.removed.length) console.log('   Hinweis: Drift ist normal (Live bewegt sich) — "node bin/sync.mjs --adopt" zieht nach.');
+} else {
+  console.log('   (uebersprungen: kein catalog/.cache vorhanden)');
+}
 
 console.log(failures ? `\nERGEBNIS: ${failures} Fehler` : '\nERGEBNIS: alles grün');
 process.exit(failures ? 1 : 0);
