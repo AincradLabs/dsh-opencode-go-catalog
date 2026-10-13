@@ -24,7 +24,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { mapReasoningEfforts, mapInput, mapLimits } from '../lib/reasoning.mjs';
 import { fetchProtocolTable } from '../lib/protocols.mjs';
-import { fetchRoster, buildAutoCatalog } from '../lib/live.mjs';
+import { fetchRoster, buildAutoCatalog, findRegistryEntry } from '../lib/live.mjs';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, '..');
@@ -72,9 +72,8 @@ async function fetchRegistry() {
 }
 
 function findEntry(models, id) {
-  if (models[id]) return models[id];
-  const hit = Object.keys(models).find((k) => k === `opencode-go/${id}` || k.split('/').pop() === id);
-  return hit ? models[hit] : null;
+  // Eine Auflösung für alle: liegt in lib/live.mjs (Host-Modul nutzt dieselbe).
+  return findRegistryEntry(models, id);
 }
 
 async function main() {
@@ -125,16 +124,20 @@ async function main() {
   });
 
   if (autoPreview) {
-    console.log(`\nAuto-Modus: ${auto.ok ? 'wuerde schreiben' : 'VERWEIGERT'} — ${auto.ok ? auto.stats.members + ' Modelle' : auto.reason}`);
+    console.log(`\nAuto-Modus: ${auto.ok ? 'würde schreiben' : 'VERWEIGERT'} — ${auto.ok ? auto.stats.members + ' live aufgelöste Modelle' : auto.reason}`);
+    console.log('  Gurte: minAutoModels=8 minAutoRatio=0.6 minProtocolRows=10 (Defaults — der Host kann per config abweichen)');
     for (const [route, n] of Object.entries(auto.stats.perRoute)) console.log(`  ${route}: ${n}`);
     console.log(`  neu im Picker: ${auto.stats.added.length ? auto.stats.added.join(', ') : '(keine)'}`);
-    console.log(`  faellt raus:   ${auto.stats.removed.length ? auto.stats.removed.join(', ') : '(keine)'}`);
+    console.log(`  fällt raus:    ${auto.stats.removed.length ? auto.stats.removed.join(', ') : '(keine)'}`);
+    if (auto.stats.snapshotRoutes.length) console.log(`  aus dem Snapshot bedient (leere Route): ${auto.stats.snapshotRoutes.join(', ')}`);
     if (auto.stats.unresolved.length) {
       console.log('  unresolved (bleibt draussen, kein Protokoll/Metadaten):');
       for (const u of auto.stats.unresolved) console.log('    - ' + u);
     }
     if (auto.stats.vetoed.length) console.log(`  Veto-Liste: ${auto.stats.vetoed.join(', ')}`);
+    if (auto.stats.reusedLimits.length) console.log(`  Limits aus dem Snapshot übernommen: ${auto.stats.reusedLimits.join(', ')}`);
     if (auto.stats.needsReview.length) console.log(`  needsReview (Limits fehlen/aus Snapshot): ${auto.stats.needsReview.join(', ')}`);
+    for (const n of auto.stats.notes) console.log('  ! ' + n);
     console.log('\nVorschau: nichts geschrieben.');
     return;
   }
@@ -169,13 +172,19 @@ async function main() {
 
   const snapIds = new Set(Object.values(snapshot.routes).flatMap((r) => r.models.map((m) => m.id)));
   const added = [...(roster.ids ?? [])].filter((id) => !snapIds.has(id) && regIds.has(id)).sort();
+  // Roster-only-IDs haben weder Metadaten noch Protokoll: der Auto-Modus kann
+  // sie nicht aufnehmen, verschweigen darf man sie aber nicht.
+  const rosterOnly = [...(roster.ids ?? [])].filter((id) => !snapIds.has(id) && !regIds.has(id)).sort();
 
   console.log(`\nFeld-Updates: ${fieldChanges.length}`);
   for (const c of fieldChanges) console.log('  ~ ' + c);
-  console.log(`Neu live (nicht im Snapshot): ${added.length ? '' : '(keine)'}`);
+  console.log(`Neu live und registry-bekannt (nicht im Snapshot): ${added.length ? '' : '(keine)'}`);
   for (const id of added) {
     const api = oracle.table?.[id];
     console.log(`  + ${id}  [${api ?? 'PROBEN! (keine Doku-Zeile)'}]`);
+  }
+  if (rosterOnly.length) {
+    console.log(`Nur im Roster, ohne Metadaten (bleibt draussen): ${rosterOnly.join(', ')}`);
   }
   if (needsReview.length) {
     console.log('Prueffaelle:');

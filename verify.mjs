@@ -63,6 +63,7 @@ const doc = JSON.parse(fs.readFileSync(path.join(ROOT, 'catalog', 'models.json')
 const routes = doc.routes ?? {};
 const expected = { 'opencode-go-extras': 'openai-completions', 'opencode-go-responses': 'openai-responses', 'opencode-go-messages': 'anthropic-messages' };
 let total = 0;
+let needsReviewCount = 0;
 const seen = new Set();
 for (const [route, api] of Object.entries(expected)) {
   const rec = routes[route];
@@ -71,7 +72,16 @@ for (const [route, api] of Object.entries(expected)) {
   (rec.baseURL === 'https://opencode.ai/zen/go/v1') ? ok(`${route}: baseURL korrekt`) : fail(`${route}: baseURL falsch`);
   for (const m of rec.models ?? []) {
     total++;
-    if (!m.id || !m.name || !m.contextWindow || !m.maxTokens || !m.input) fail(`${route}: ${m.id ?? '?'} unvollständig`);
+    // Pflicht ist id/name/input. Kapazitaeten sind OPTIONAL (der Auto-Modus
+    // laesst sie weg, wenn die Registry keine nennt -> llm-pi-ai-Defaults);
+    // stehen sie da, muessen sie positve Integer sein. Muss zu
+    // bin/sync.mjs checkSnapshot() passen — sonst faellt der dokumentierte
+    // Ablauf "--adopt -> verify.mjs" ueber seinen eigenen Zustand.
+    if (!m.id || !m.name || !m.input) fail(`${route}: ${m.id ?? '?'} unvollständig (id/name/input)`);
+    for (const f of ['contextWindow', 'maxTokens']) {
+      if (m[f] !== undefined && (!Number.isInteger(m[f]) || m[f] <= 0)) fail(`${m.id}: ${f} muss positiver Integer sein (${m[f]})`);
+    }
+    if (m.needsReview) needsReviewCount++;
     if (seen.has(m.id)) fail('Doppel-ID: ' + m.id);
     seen.add(m.id);
     for (const p of validateReasoningEfforts(m.id, m.reasoningEfforts)) fail(p);
@@ -82,7 +92,7 @@ for (const [route, api] of Object.entries(expected)) {
 }
 if (!('opencode-go' in routes)) ok('eingebaute Route nicht im Snapshot (Sicherheitsgurt)');
 else fail('Snapshot darf opencode-go NICHT enthalten');
-console.log(`   Snapshot gesamt: ${total} Modelle auf ${Object.keys(routes).length} Routen`);
+console.log(`   Snapshot gesamt: ${total} Modelle auf ${Object.keys(routes).length} Routen, ${needsReviewCount} mit needsReview`);
 if (!seen.has('step-5-preview-free')) fail('step-5-preview-free fehlt — Hauptgrund des Plugins!');
 else ok('step-5-preview-free enthalten');
 
@@ -102,16 +112,18 @@ const parsed = parseProtocolTable(FIXTURE, { roster: fixRoster });
   ? ok('Roster-Filter wirft Fremd-IDs weg (Regex-Fehltreffer erreichen keine Route)')
   : fail('Roster-Filter greift nicht');
 const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>', { roster: fixRoster });
-(conflict.conflicts.length === 1 && conflict.table['cat-jam-free'] === 'openai-completions')
-  ? ok('widerspruechliche Doppelzeile wird gemeldet, die erste gilt')
-  : fail('Konflikt-Erkennung greift nicht');
+(conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table))
+  ? ok('widerspruechliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
+  : fail('Konflikt-Erkennung greift nicht: ' + JSON.stringify({ conflicts: conflict.conflicts, value: conflict.table['cat-jam-free'] }));
 
 console.log('== lib/live.mjs (Auto-Mitgliedschaft, Fixture offline) ==');
 const snapFixture = {
   routes: {
     'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [{ id: 'old-gone', name: 'Old Gone', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
     'opencode-go-responses': { api: 'openai-responses', baseURL: 'https://x/v1', displayName: 'responses', models: [] },
-    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [] },
+    // messages hat bewusst einen Snapshot-Eintrag: der Leer-Routen-Gurt soll
+    // hier NICHT greifen (er hat einen eigenen Test unten).
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'old-msg', name: 'Old Msg', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
   },
   excluded: { 'veto-me': 'Testveto', '_hinweis': 'Kommentar, keine ID' },
 };
@@ -143,6 +155,35 @@ const noLimits = autoFixture.routes['opencode-go-responses'].models[0];
   ? ok('unresolved statt raten (kein Protokoll)') : fail('unresolved falsch: ' + JSON.stringify(autoFixture.stats.unresolved));
 const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
 (!refused.ok) ? ok('Sicherheitsgurt: zu wenige Modelle -> Auto verweigert, Snapshot gilt') : fail('minAutoModels-Gurt greift nicht');
+
+// Gurt 3 (Review-Befund 1): eine LEERE Route darf nie geschrieben werden.
+// llm-pi-ai lehnt "resolves no models" ab, und weil alle Routen in EINER
+// mutate-Op-Liste stehen, würde eine leere Gruppe auch die gesunden blockieren.
+const snapWithFallback = {
+  routes: {
+    'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [] },
+    'opencode-go-responses': { api: 'openai-responses', baseURL: 'https://x/v1', displayName: 'responses', models: [{ id: 'only-resp', name: 'Only Resp', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'only-msg', name: 'Only Msg', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+  },
+};
+const regAll = { m1: { id: 'm1', name: 'M1', limit: { context: 1, output: 1 }, modalities: { input: ['text'] } }, m2: { id: 'm2', name: 'M2', limit: { context: 1, output: 1 }, modalities: { input: ['text'] } } };
+const emptyRoutes = buildAutoCatalog({
+  snapshot: snapWithFallback,
+  registryModels: regAll,
+  roster: ['m1', 'm2'],
+  protocols: { m1: 'openai-completions', m2: 'openai-completions' }, // responses+messages bleiben leer
+  cfg: { minAutoModels: 1, minAutoRatio: 0 },
+});
+const emptyOk = emptyRoutes.ok
+  && emptyRoutes.routes['opencode-go-responses'].models.length > 0
+  && emptyRoutes.routes['opencode-go-messages'].models.length > 0
+  && emptyRoutes.stats.snapshotRoutes.length === 2;
+emptyOk ? ok('leere Route wird aus dem Snapshot bedient (kein "resolves no models", gesunde Gruppen bleiben live)')
+  : fail('Leer-Routen-Gurt greift nicht: ' + JSON.stringify(emptyRoutes.stats));
+
+// Gurt 2 (Review-Befund 5): degradierte Quelle -> verweigern statt halben Picker leeren.
+const thin = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 1, minAutoRatio: 5 } });
+(!thin.ok && /minAutoRatio/.test(thin.reason ?? '')) ? ok('Verhältnis-Gurt: dünne Quelle -> Auto verweigert (minAutoRatio)') : fail('minAutoRatio-Gurt greift nicht: ' + JSON.stringify(thin.reason));
 
 console.log('== Snapshot vs. letzte Live-Erhebung (offline, nur Bericht) ==');
 const cacheFile = (n) => path.join(ROOT, 'catalog', '.cache', n);

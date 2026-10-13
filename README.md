@@ -24,9 +24,9 @@ models appear, retired ones drop out, no hand work. A curated snapshot stays as 
 
 ## Why
 
-The built-in `opencode-go` catalog in `@deepseek-ai/pi-ai` is a static build snapshot (30 models at
-the time of writing) that never refreshes itself — new models like Step 5 or Cat Jam are missing
-until upstream bumps the dependency. See
+The built-in `opencode-go` route of `@deepseek-ai/dsh-llm-pi-ai` serves a static catalog shipped in
+`@earendil-works/pi-ai` (30 models at the time of writing) that never refreshes itself — new models
+like Step 5 or Cat Jam are missing until upstream bumps the dependency. See
 [Discussion #3957](https://github.com/deepseek-ai/deepseek-harness/discussions/3957).
 
 This plugin never touches the built-in route. It manages three sibling routes through the
@@ -62,10 +62,20 @@ untouched.
 4. Membership is then `roster ∩ registry ∩ protocol-known`, minus the veto list. On startup, on an
    interval (default 4 h), and on `/opencode-go-sync` the three sibling routes are written via
    `settings.mutate`.
-5. **Fail-safe:** if the roster or the oracle is unavailable, the curated snapshot in
-   `catalog/models.json` is served unchanged. A network outage or a docs redesign can never empty
-   the picker. Missing capacities are never invented — the field is omitted and `needsReview` is
-   reported, so `llm-pi-ai` applies its own route defaults (262144 / 32768).
+5. **Fail-safe.** The auto mode refuses to write, and the curated snapshot in `catalog/models.json`
+   is served unchanged, when
+   - the roster or the oracle is unavailable (network, docs redesign), or
+   - fewer than `minAutoModels` models resolve, or
+   - fewer than `minAutoRatio` (default 60 %) of the last adopted set resolve — this catches a
+     *degraded* source that would otherwise quietly empty half the picker and stamp the missing IDs
+     as retired.
+
+   A single route that comes out empty is not fatal either: `llm-pi-ai` rejects a route with
+   `resolves no models`, and because all three routes go into one `settings.mutate`, one empty group
+   would block the healthy groups too — so that route is served from the snapshot and reported in
+   `status.json` (`auto.snapshotRoutes`). A network outage or a docs redesign can therefore never
+   empty the picker. Missing capacities are never invented — the field is omitted and `needsReview`
+   is reported, so `llm-pi-ai` applies its own route defaults (262144 / 32768).
 6. The module never throws during boot, never edits `node_modules`, and never reads or writes
    credentials (it only references the `OPENCODE_GO_API_KEY` name, same as the built-in route).
 
@@ -107,7 +117,8 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
     autoMembership: true     # false → curated snapshot only, no roster/oracle
     minAutoModels: 8         # safety belt: below this the snapshot is served
     minProtocolRows: 10      # safety belt against a docs redesign
-    refreshReasoning: true   # false → use snapshot file values only, no network
+    minAutoRatio: 0.6        # safety belt against a degraded (not dead) source; 0 disables it
+    refreshReasoning: true   # false → snapshot values only, no network (this also disables auto mode)
     sessionHeaderValue: 'dsh-opencode-go-catalog'  # false → no static session header (400 risk)
     intervalMinutes: 240     # 0 → startup only
     startupDelaySeconds: 10
@@ -125,7 +136,7 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
 |---|---|
 | `/opencode-go-sync` (chat) | Immediate rewrite from the live sources. Registered through `ctx.root` into the global command layer, so it appears in the `/` menu for every session (registering through the plugin fiber context lands outside all agent scope chains: self-probe green, menu empty — fixed in 0.1.4) |
 | `node bin/sync.mjs` (default) | Report: field diffs, new live IDs with their protocol, dead IDs — writes nothing |
-| `node bin/sync.mjs --auto` | Preview exactly what the auto mode would publish (per route, added, removed, unresolved) |
+| `node bin/sync.mjs --auto` | Preview what the auto mode would publish (per route, added, removed, unresolved). Uses the default safety belts — a non-default `minAutoModels`/`minAutoRatio`/`minProtocolRows` in the profile patch can make the host decide differently |
 | `node bin/sync.mjs --adopt` | Write the live membership into the snapshot (fallback stays current) |
 | `node bin/sync.mjs --write` | Rewrite snapshot fields from the registry + stamp the date |
 | `node bin/sync.mjs --check` | Offline snapshot rule check |
@@ -147,7 +158,7 @@ Bundle row ([cordis.patch.yml](cordis.patch.yml), replaces the whole row — no 
 
 Live examples: Cat Jam Free → `{low, medium, high, xhigh, max}`; GPT-5.6 Luna →
 `{off: none, low…max}`; Muse Spark → `{minimal…xhigh}` (no `max`!); LongCat-2.0 /
-MiniMax M2.5 (`toggle`-only) → no menu.
+MiniMax M3 (`toggle`-only) → no menu.
 
 ## The protocol oracle
 
@@ -166,8 +177,10 @@ the live roster, so a regex false positive can never invent a model ID. An ID wi
 `qwen3.6-plus`, `qwen3.7-max` (live and in the registry, but undocumented), `deepseek-flash`,
 `glm-5.1`, `omen-alpha` (roster-only, no metadata at all).
 
-If the page stops yielding at least `minProtocolRows` rows, the table is treated as unavailable and
-the snapshot is served.
+If the page stops yielding at least `minProtocolRows` rows, the last-good cached table is used; only
+without a cache does the snapshot apply. A row that contradicts another row for the same ID takes
+that ID out of the oracle entirely (keeping the first would be a guess) and is reported under
+`auto.conflicts` in `status.json`.
 
 ## Maintaining the catalog
 
