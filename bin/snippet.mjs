@@ -34,12 +34,22 @@ for (const [route, rec] of Object.entries(doc.routes)) {
   out.push(`        displayName: ${rec.displayName}`);
   out.push(`        api: ${rec.api}`);
   out.push(`        baseURL: ${rec.baseURL}`);
+  // Pflicht seit 09/05: das Gateway verlangt x-opencode-session. pi-ai hängt
+  // den Header nur an KATALOG-Routen (withOpenCodeSessionHeader im
+  // opencode-go-Provider-Modul); eine hand-deklarierte Route bekommt ihn nicht
+  // und antwortet 400 MissingSessionID. Deshalb hier statisch setzen —
+  // dieselbe Krücke wie im Plugin (sessionHeaderValue). Ohne diese Zeile ist
+  // Weg A kaputt (Fund 2026-10-13).
+  out.push(`        headers:`);
+  out.push(`          x-opencode-session: ${JSON.stringify('dsh-opencode-go-catalog')}`);
   out.push(`        models:`);
   for (const m of rec.models) {
     out.push(`          - id: ${m.id}`);
     out.push(`            name: "${esc(m.name)}"`);
-    out.push(`            contextWindow: ${m.contextWindow}`);
-    out.push(`            maxTokens: ${m.maxTokens}`);
+    // Kapazitäten nur wenn verifiziert — fehlt ein Wert, entscheidet
+    // llm-pi-ai (Default 262144/32768) statt einer erfundenen Zahl.
+    if (Number.isInteger(m.contextWindow)) out.push(`            contextWindow: ${m.contextWindow}`);
+    if (Number.isInteger(m.maxTokens)) out.push(`            maxTokens: ${m.maxTokens}`);
     out.push(`            input: [${m.input.join(', ')}]`);
     if (m.reasoningEfforts) {
       out.push(`            reasoningEfforts:`);

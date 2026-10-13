@@ -45,7 +45,7 @@ enough). On startup it reads the changed file.
 1. Open the model picker (where you usually switch models).
 2. You now see **three new groups**: *OpenCode Go (extras)*, *OpenCode Go (responses)*,
    *OpenCode Go (messages)* — in addition to the existing group.
-3. Type `step-5` in the search: **Step 5 Preview Free** appears. Select it, ask a short
+3. Type `cat-jam` in the search: **Cat Jam Free** appears. Select it, ask a short
    question — if it answers, you're done. 🎉
 
 ## On / off
@@ -65,8 +65,9 @@ enough). On startup it reads the changed file.
 
 ## And the plugin with auto-refresh?
 
-That's the main path (see [README.md](README.md)): it writes these three groups freshly by
-itself. It needs a one-click install via the Plugin Market first, which requires a catalog
-listing — in progress. **This snippet is no throwaway:** the exact same 19 models with the
-same fresh values — only the automatic upkeep is missing. When models go missing again,
-regenerate the block and repeat steps 2–4.
+That's the main path (see [README.md](README.md)): it rebuilds these three groups on every sync from
+the live roster plus the docs endpoint table — new models appear, retired ones drop out, no hand
+work at all. It needs a one-click install via the Plugin Market first, which requires a catalog
+listing — in progress. **This snippet is no throwaway:** the same models with the same fresh values
+— only the automatic upkeep is missing. When models go missing again, regenerate the block
+(`node bin/snippet.mjs > weg-a-schnellstart.yml`) and repeat steps 2–4.
