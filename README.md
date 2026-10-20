@@ -163,34 +163,46 @@ MiniMax M3 (`toggle`-only) → no menu.
 
 ## The protocol oracle
 
-No JSON endpoint discloses the wire protocol. The docs endpoint table does, per model ID, and it is
-the same table the hand-calibrated snapshot was verified against:
+No JSON endpoint discloses the **wire endpoint** per model, but the registry names the **lane** in
+`providers.opencode-go.models[<id>].provider.api`: `…/inference/go/openai/v1`,
+`…/inference/go/anthropic/v1` or `…/inference/go/google/v1beta` (33/33 entries on 2026-10-19, 0
+contradictions with the table below). The lane settles `anthropic` and `google` on its own but is
+ambiguous inside the OpenAI lane (`chat/completions` vs `responses`), so the docs table stays the
+oracle for that split. Using the lane as a second, path-independent oracle is tracked in
+[#10](https://github.com/AincradLabs/dsh-opencode-go-catalog/issues/10).
 
 | Source | Verdict |
 |---|---|
 | `https://opencode.ai/docs/go/` endpoint table | **oracle** — 33 rows on 2026-10-13, 28 rows on 2026-10-19 (v2 page) |
+| Registry `provider.api` lane | corroborates the table (anthropic lane ↔ `anthropic-messages`); ambiguous inside the OpenAI lane |
 | Hand-calibrated snapshot | 0 conflicts with the table |
 | Shipped pi-ai catalog (`data/opencode-go.json`) | **not usable** — contradicts the table on `minimax-m2.7`, `qwen3.7-plus`, `qwen3.8-max` |
 
 `lib/protocols.mjs` parses the table (`htmlToText` + one row regex) and filters every hit against
-the live roster, so a regex false positive can never invent a model ID. The row regex accepts both
-documented URL shapes and reads the SDK column (`@ai-sdk/openai-compatible` / `openai` / `anthropic`)
-as a cross-check: if the URL path and the SDK column disagree, that ID leaves the oracle and is
-reported under `auto.conflicts`. An ID without a table row is **not guessed** — it is reported as
-`unresolved` in `status.json` and stays out. Current examples: `qwen3.6-plus`, `qwen3.7-max`,
-`glm-5.1`, `omen-alpha`, `gemini-4-argon-contributor` (live, undocumented).
+the live roster, so a regex false positive can never invent a model ID. The row regex anchors on a
+Go inference **path**, not a host, and accepts both documented URL shapes. It also reads the SDK
+column (`@ai-sdk/openai-compatible` / `openai` / `anthropic`) as a cross-check: `@ai-sdk/openai`
+serves both OpenAI endpoints, so only a statement that excludes the parsed endpoint counts as a
+contradiction — then that ID leaves the oracle and is reported under `auto.conflicts`. An unknown
+endpoint suffix is never rescued by the SDK column: a new endpoint type (e.g. `/embeddings`) must not
+land in a chat route. An ID without a table row is **not guessed** — it is reported as `unresolved`
+in `status.json` and stays out. Current examples: `qwen3.6-plus`, `qwen3.7-max`, `glm-5.1`,
+`omen-alpha`, `gemini-4-argon-contributor` (live, undocumented).
 
 **Row dropped from the docs (carry-over, 2026-10-19).** The v2 table no longer lists every live ID
 (`minimax-m2.7` is the example). For such an ID the protocol already verified in the snapshot applies
 again — no heuristic, but second-hand, so it is reported under `auto.carried`. The committed snapshot
-is the evidence source on purpose: the cache is overwritten by every successful read.
+is the evidence source on purpose; the cache keeps only rows a live read actually produced. A rejected
+ID is excluded from the carry-over as well: a contradiction is not a gap.
 
 **Silent-staleness guard.** If the page stops yielding at least `minProtocolRows` rows, the last-good
-cached table is used and `auto.degraded` is set; the host logs that as a **warning**, because in this
-state new Go models silently stay out of the picker. This is exactly what happened between the v2
-docs redesign (`/go/v1/…` → `/go/<lane>/v1/…`) and the regex fix on 2026-10-19. A row that
-contradicts another row for the same ID takes that ID out of the oracle entirely (keeping the first
-would be a guess) and is reported under `auto.conflicts` in `status.json`.
+cached table is used and `auto.degraded` is set with `auto.degradedReason: "shape"`; the host logs a
+warning naming the redirect target, because in this state new Go models silently stay out of the
+picker. This is exactly what happened between the v2 docs redesign (`/go/v1/…` →
+`/go/<lane>/v1/…`) and the regex fix on 2026-10-19. A network failure keeps the same cache but is
+reported as `degradedReason: "network"` — it is not a docs-format problem. A row that contradicts
+another row for the same ID takes that ID out of the oracle entirely (keeping the first would be a
+guess) and is reported under `auto.conflicts` in `status.json`.
 
 ## Maintaining the catalog
 

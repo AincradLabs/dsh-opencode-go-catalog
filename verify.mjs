@@ -3,10 +3,11 @@
 // Gebrauch: node verify.mjs   (Exit 1 bei Fehlern)
 
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { validateReasoningEfforts } from './lib/reasoning.mjs';
-import { parseProtocolTable } from './lib/protocols.mjs';
+import { parseProtocolTable, fetchProtocolTable } from './lib/protocols.mjs';
 import { buildAutoCatalog } from './lib/live.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '.');
@@ -126,6 +127,17 @@ const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-
 (conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table))
   ? ok('widersprüchliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
   : fail('Konflikt-Erkennung greift nicht: ' + JSON.stringify({ conflicts: conflict.conflicts, value: conflict.table['cat-jam-free'] }));
+// N6: @ai-sdk/openai bedient BEIDE OpenAI-Endpunkte. Eine chat/completions-Zeile
+// mit diesem Paket ist kein Widerspruch und darf nicht verworfen werden.
+const sdkWide = parseProtocolTable('<tr><td>Chatty</td><td>chatty</td><td>https://opencode.ai/inference/go/openai/v1/chat/completions</td><td>@ai-sdk/openai</td></tr>', { roster: new Set(['chatty']) });
+(sdkWide.table.chatty === 'openai-completions')
+  ? ok('@ai-sdk/openai auf chat/completions ist kein Widerspruch (Paket bedient beide Endpunkte)')
+  : fail('N6-Regression: legitime chat-Zeile mit @ai-sdk/openai wird verworfen: ' + JSON.stringify({ table: sdkWide.table, conflicts: sdkWide.conflicts }));
+// B3: ein unbekannter Endpunkt bleibt unbekannt — auch mit bekannter SDK-Spalte.
+const noRescue = parseProtocolTable('<tr><td>Emb</td><td>emb-model</td><td>https://opencode.ai/inference/go/openai/v1/embeddings</td><td>@ai-sdk/openai-compatible</td></tr>', { roster: new Set(['emb-model']) });
+(!('emb-model' in noRescue.table) && noRescue.ignored.some((i) => i.startsWith('emb-model')))
+  ? ok('unbekannter Endpunkt wird NICHT über die SDK-Spalte gerettet (kein Raten)')
+  : fail('B3: Endpunkt-Rettung wieder drin: ' + JSON.stringify(noRescue.table));
 
 console.log('== lib/live.mjs (Auto-Mitgliedschaft, Fixture offline) ==');
 const snapFixture = {
@@ -188,6 +200,35 @@ const carriedAuto = buildAutoCatalog({
   && carriedAuto.routes['opencode-go-extras'].models.some((m) => m.id === 'doc-gone'))
   ? ok('Doku listet ID nicht mehr -> belegtes Snapshot-Protokoll gilt weiter (gemeldet als carried)')
   : fail('Carry-over greift nicht: ' + JSON.stringify(carriedAuto.stats.carried));
+// B1 (fetch-Seite hat den gleichen Fall): eine ID, deren Protokoll die Live-Doku
+// widersprüchlich nennt, darf auch der Snapshot nicht per Carry-over zurückholen.
+const rejectSnap = {
+  routes: {
+    'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [
+      { id: 'doc-gone', name: 'Doc Gone', contextWindow: 1000, maxTokens: 100, input: ['text'] },
+      { id: 'keep-ex', name: 'Keep Ex', contextWindow: 1000, maxTokens: 100, input: ['text'] },
+    ] },
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'doc-live', name: 'Doc Live', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
+  },
+};
+const rejectReg = {
+  'doc-gone': { id: 'doc-gone', name: 'Doc Gone', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+  'keep-ex': { id: 'keep-ex', name: 'Keep Ex', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+  'doc-live': { id: 'doc-live', name: 'Doc Live', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+};
+const rejectAuto = buildAutoCatalog({
+  snapshot: rejectSnap,
+  registryModels: rejectReg,
+  roster: ['doc-gone', 'keep-ex', 'doc-live'],
+  protocols: { 'doc-live': 'anthropic-messages' },
+  protocolRejects: ['doc-gone'],
+  cfg: { minAutoModels: 1, minAutoRatio: 0 },
+});
+const rejectIds = Object.values(rejectAuto.routes ?? {}).flatMap((r) => r.models.map((m) => m.id));
+(rejectAuto.ok && !rejectIds.includes('doc-gone') && rejectAuto.stats.rejected.includes('doc-gone')
+  && rejectAuto.stats.unresolved.some((u) => u.startsWith('doc-gone') && /widersprüchlich/.test(u)))
+  ? ok('B1: vom Orakel verworfene ID bleibt draussen, auch der Snapshot holt sie nicht zurück')
+  : fail('B1 im Auto-Modus: ' + JSON.stringify({ ids: rejectIds, rejected: rejectAuto.stats.rejected, unresolved: rejectAuto.stats.unresolved }));
 const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
 (!refused.ok) ? ok('Sicherheitsgurt: zu wenige Modelle -> Auto verweigert, Snapshot gilt') : fail('minAutoModels-Gurt greift nicht');
 
@@ -246,7 +287,80 @@ dupOk ? ok('Snapshot-Rückfall filtert bereits platzierte IDs (kein Modell unter
 const thin = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 1, minAutoRatio: 5 } });
 (!thin.ok && /minAutoRatio/.test(thin.reason ?? '')) ? ok('Verhältnis-Gurt: dünne Quelle -> Auto verweigert (minAutoRatio)') : fail('minAutoRatio-Gurt greift nicht: ' + JSON.stringify(thin.reason));
 
+console.log('== lib/protocols.mjs fetchProtocolTable (Netz gestubbt, offline) ==');
+// Der Host ruft fetchProtocolTable, nicht parseProtocolTable — die Gurte
+// (Cache, degraded, Carry-over) liefen bisher ungetestet (Review-Befund B2).
+// globalThis.fetch wird für diesen Block ersetzt und danach zurückgesetzt.
+{
+  const realFetch = globalThis.fetch;
+  const oracleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-go-oracle-'));
+  const cacheJson = (name) => path.join(oracleDir, name);
+  const warmTable = { 'keep-a': 'openai-completions', 'doc-gone': 'openai-completions', 'beam-x': 'openai-completions' };
+  fs.writeFileSync(cacheJson('protocols.json'), JSON.stringify({ fetchedAt: 'x', url: 'x', rows: 3, table: warmTable }));
+  const roster = new Set(['keep-a', 'keep-b', 'beam-x', 'doc-gone']);
+  const rowsHtml = (rows) => `<table>${rows.map(([n, id, url, sdk]) => `<tr><td>${n}</td><td>${id}</td><td>${url}</td><td>@ai-sdk/${sdk}</td></tr>`).join('')}</table>`;
+  const base = 'https://opencode.ai/inference/go';
+  try {
+    // 1) Netz tot, warmer Cache -> cache-fallback + degraded(network)
+    globalThis.fetch = async () => { throw new Error('ENOTFOUND docs.opencode.ai'); };
+    const down = await fetchProtocolTable({ minProtocolRows: 2 }, { cacheDir: oracleDir, roster });
+    (down.source === 'cache-fallback' && down.degraded === true && down.reason === 'network' && Object.keys(down.table ?? {}).length === 3)
+      ? ok('Netz tot + Cache -> cache-fallback, degraded (reason network)')
+      : fail('cache-fallback-Fall falsch: ' + JSON.stringify({ source: down.source, reason: down.reason, ids: Object.keys(down.table ?? {}).length }));
+
+    // 2) Netz tot, kein Cache -> failed, Tabelle null (Host nimmt den Snapshot)
+    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-go-nocache-'));
+    const cold = await fetchProtocolTable({}, { cacheDir: emptyDir, roster });
+    (cold.source === 'failed' && cold.table === null && cold.degraded === true)
+      ? ok('Netz tot ohne Cache -> failed, table null (Snapshot gilt)')
+      : fail('failed-Fall falsch: ' + JSON.stringify({ source: cold.source, table: cold.table }));
+    fs.rmSync(emptyDir, { recursive: true, force: true });
+
+    // 3) Doku umgebaut (lesbar, aber 0 Zeilen) -> cache-shape-changed + reason shape
+    globalThis.fetch = async () => ({ ok: true, status: 200, url: 'https://opencode.ai/v3/docs/go/', text: async () => '<html><body><h1>Go</h1><p>keine Tabelle mehr</p></body></html>' });
+    const shape = await fetchProtocolTable({ minProtocolRows: 2 }, { cacheDir: oracleDir, roster });
+    (shape.source === 'cache-shape-changed' && shape.reason === 'shape' && shape.parsedRows === 0 && Object.keys(shape.table ?? {}).length === 3)
+      ? ok('Doku-Format geändert -> cache-shape-changed, degraded (reason shape), parsedRows 0')
+      : fail('shape-Fall falsch: ' + JSON.stringify({ source: shape.source, reason: shape.reason, parsedRows: shape.parsedRows }));
+
+    // 4) Live-Tabelle + Carry-over + Review-Befund B1: eine vom Parser
+    //    verworfene ID darf NICHT per Cache zurückkommen.
+    globalThis.fetch = async () => ({
+      ok: true,
+      status: 200,
+      url: 'https://opencode.ai/v2/docs/console/go/',
+      text: async () => rowsHtml([
+        ['Keep A', 'keep-a', `${base}/openai/v1/chat/completions`, 'openai-compatible'],
+        ['Keep B', 'keep-b', `${base}/anthropic/v1/messages`, 'anthropic'],
+        ['Beam X', 'beam-x', `${base}/openai/v1/chat/completions`, 'anthropic'], // Widerspruch
+      ]),
+    });
+    const live = await fetchProtocolTable({ minProtocolRows: 2 }, { cacheDir: oracleDir, roster });
+    (live.source === 'live' && live.finalUrl === 'https://opencode.ai/v2/docs/console/go/')
+      ? ok('Live-Lesung: source live, finalUrl wird mitgeführt (Redirect-Ziel sichtbar)')
+      : fail('Live-Fall falsch: ' + JSON.stringify({ source: live.source, url: live.finalUrl }));
+    (live.table['keep-a'] === 'openai-completions' && live.table['keep-b'] === 'anthropic-messages')
+      ? ok('Live-Zeilen korrekt gemappt')
+      : fail('Live-Zeilen falsch: ' + JSON.stringify(live.table));
+    (live.carried?.includes('doc-gone') && live.table['doc-gone'] === 'openai-completions')
+      ? ok('Carry-over: live fehlende ID (doc-gone) behält das belegte Cache-Protokoll')
+      : fail('Carry-over greift nicht: ' + JSON.stringify({ carried: live.carried, table: live.table }));
+    (!('beam-x' in live.table) && (live.rejected ?? []).includes('beam-x'))
+      ? ok('B1-Regression: vom Parser verworfene ID kommt NICHT per Carry-over zurück')
+      : fail('B1: verworfene ID wieder im Picker: ' + JSON.stringify({ table: live.table['beam-x'], rejected: live.rejected }));
+    const written = JSON.parse(fs.readFileSync(cacheJson('protocols.json'), 'utf8'));
+    (!('doc-gone' in (written.table ?? {})) && (written.carried ?? []).includes('doc-gone'))
+      ? ok('Cache persistiert nur live gelesene Zeilen (Übernommenes bleibt zweithändig)')
+      : fail('Cache enthält zweithändige Zeilen: ' + JSON.stringify({ table: written.table, carried: written.carried }));
+  } finally {
+    globalThis.fetch = realFetch;
+    fs.rmSync(oracleDir, { recursive: true, force: true });
+  }
+}
+
 console.log('== Snapshot vs. letzte Live-Erhebung (offline, nur Bericht) ==');
+// Der Cache hält seit dem B1-Fix nur live gelesene Zeilen — dieser Vergleich ist
+// damit unabhängig vom Carry-over (Review-Befund N8).
 const cacheFile = (n) => path.join(ROOT, 'catalog', '.cache', n);
 if (fs.existsSync(cacheFile('registry.json')) && fs.existsSync(cacheFile('roster.json')) && fs.existsSync(cacheFile('protocols.json'))) {
   const reg = JSON.parse(fs.readFileSync(cacheFile('registry.json'), 'utf8'));

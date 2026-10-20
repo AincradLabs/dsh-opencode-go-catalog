@@ -126,8 +126,11 @@ async function main() {
   console.log(`Roster: ${roster.ids ? roster.ids.size : 0} IDs (${roster.source})`
     + ` | Protokoll-Orakel: ${oracle.table ? Object.keys(oracle.table).length : 0} IDs (${oracle.source})`
     + (oracle.finalUrl ? ` @ ${oracle.finalUrl}` : ''));
-  if (oracle.degraded) console.log('  ! Orakel DEGRADIERT — Doku-Format hat sich geändert, es gilt der Cache. Neue Modelle bleiben draussen.');
+  if (oracle.degraded) console.log(oracle.reason === 'shape'
+    ? '  ! Orakel DEGRADIERT — Doku-Format hat sich geändert, es gilt der Cache. Neue Modelle bleiben draussen.'
+    : `  ! Orakel NICHT ERREICHBAR (${oracle.error ?? 'Netzfehler'}) — es gilt der Cache.`);
   if (oracle.carried?.length) console.log(`  Protokoll aus dem Cache (Doku listet die ID nicht mehr): ${oracle.carried.join(', ')}`);
+  if (oracle.rejected?.length) console.log(`  ! Orakel hat verworfen (URL vs SDK widersprüchlich): ${oracle.rejected.join(', ')}`);
   if (oracle.conflicts?.length) for (const c of oracle.conflicts) console.log('  ! Orakel-Konflikt: ' + c);
 
   const auto = buildAutoCatalog({
@@ -135,6 +138,7 @@ async function main() {
     registryModels: goModels,
     roster: roster.ids ?? [],
     protocols: oracle.table ?? {},
+    protocolRejects: oracle.rejected,
     cfg: {},
   });
 
