@@ -5,12 +5,16 @@
 //                                         reasoning_options (models.dev-Format)
 //   https://opencode.ai/zen/go/v1/models  Roster: welche IDs es JETZT gibt
 //   https://opencode.ai/docs/go/          Protokoll-Orakel: Endpoint-Tabelle
+//                                         (leitet seit 2026-10-19 auf
+//                                         /v2/docs/console/go/ um)
 //
 // PROTOKOLL-OHNE-RATEN: Die früheren Listen KNOWN_RESPONSES/KNOWN_MESSAGES
 // sind ersetzt. Das Protokoll kommt aus der Doku-Endpoint-Tabelle
 // (lib/protocols.mjs); eine ID ohne Doku-Zeile wird als "PROBEN!" gemeldet und
 // NICHT einsortiert. Erhebung 2026-10-13: 33 Doku-Zeilen, 0 Widersprüche zum
-// hand-kalibrierten Snapshot.
+// hand-kalibrierten Snapshot. Erhebung 2026-10-19 (v2-Doku, Lane im Pfad):
+// 28 Zeilen live; IDs, die die Doku nicht mehr listet, behalten das im
+// Snapshot belegte Protokoll (carry-over, gemeldet).
 //
 // GEBRAUCH:
 //   node bin/sync.mjs                 Dry-run: Feld-Diffs + neue IDs + Protokoll
@@ -120,7 +124,13 @@ async function main() {
   const roster = await fetchRoster({}, { cacheDir: CACHE_DIR });
   const oracle = await fetchProtocolTable({}, { cacheDir: CACHE_DIR, roster: roster.ids });
   console.log(`Roster: ${roster.ids ? roster.ids.size : 0} IDs (${roster.source})`
-    + ` | Protokoll-Orakel: ${oracle.table ? Object.keys(oracle.table).length : 0} IDs (${oracle.source})`);
+    + ` | Protokoll-Orakel: ${oracle.table ? Object.keys(oracle.table).length : 0} IDs (${oracle.source})`
+    + (oracle.finalUrl ? ` @ ${oracle.finalUrl}` : ''));
+  if (oracle.degraded) console.log(oracle.reason === 'shape'
+    ? '  ! Orakel DEGRADIERT — Doku-Format hat sich geändert, es gilt der Cache. Neue Modelle bleiben draussen.'
+    : `  ! Orakel NICHT ERREICHBAR (${oracle.error ?? 'Netzfehler'}) — es gilt der Cache.`);
+  if (oracle.carried?.length) console.log(`  Protokoll aus dem Cache (Doku listet die ID nicht mehr): ${oracle.carried.join(', ')}`);
+  if (oracle.rejected?.length) console.log(`  ! Orakel hat verworfen (URL vs SDK widersprüchlich): ${oracle.rejected.join(', ')}`);
   if (oracle.conflicts?.length) for (const c of oracle.conflicts) console.log('  ! Orakel-Konflikt: ' + c);
 
   const auto = buildAutoCatalog({
@@ -128,6 +138,7 @@ async function main() {
     registryModels: goModels,
     roster: roster.ids ?? [],
     protocols: oracle.table ?? {},
+    protocolRejects: oracle.rejected,
     cfg: {},
   });
 
@@ -143,6 +154,7 @@ async function main() {
       for (const u of auto.stats.unresolved) console.log('    - ' + u);
     }
     if (auto.stats.vetoed.length) console.log(`  Veto-Liste: ${auto.stats.vetoed.join(', ')}`);
+    if (auto.stats.carried.length) console.log(`  Protokoll aus dem Snapshot übernommen (Doku listet sie nicht mehr): ${auto.stats.carried.join(', ')}`);
     if (auto.stats.reusedLimits.length) console.log(`  Limits aus dem Snapshot übernommen: ${auto.stats.reusedLimits.join(', ')}`);
     if (auto.stats.needsReview.length) console.log(`  needsReview (Limits fehlen/aus Snapshot): ${auto.stats.needsReview.join(', ')}`);
     for (const n of auto.stats.notes) console.log('  ! ' + n);
