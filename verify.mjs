@@ -124,9 +124,9 @@ const sdkConflict = parseProtocolTable(FIXTURE + '<tr><td>Beam X</td><td>beam-x<
   ? ok('URL-Pfad und SDK-Spalte uneinig -> ID fliegt raus (Gegenprobe statt raten)')
   : fail('SDK-Gegenprobe greift nicht: ' + JSON.stringify({ table: sdkConflict.table['beam-x'], conflicts: sdkConflict.conflicts }));
 const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>', { roster: fixRoster });
-(conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table))
-  ? ok('widersprüchliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
-  : fail('Konflikt-Erkennung greift nicht: ' + JSON.stringify({ conflicts: conflict.conflicts, value: conflict.table['cat-jam-free'] }));
+(conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table) && conflict.rejected.includes('cat-jam-free'))
+  ? ok('widersprüchliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten), landet in rejected und wird gemeldet')
+  : fail('Konflikt-Erkennung greift nicht: ' + JSON.stringify({ conflicts: conflict.conflicts, rejected: conflict.rejected, value: conflict.table['cat-jam-free'] }));
 // N6: @ai-sdk/openai bedient BEIDE OpenAI-Endpunkte. Eine chat/completions-Zeile
 // mit diesem Paket ist kein Widerspruch und darf nicht verworfen werden.
 const sdkWide = parseProtocolTable('<tr><td>Chatty</td><td>chatty</td><td>https://opencode.ai/inference/go/openai/v1/chat/completions</td><td>@ai-sdk/openai</td></tr>', { roster: new Set(['chatty']) });
@@ -225,10 +225,31 @@ const rejectAuto = buildAutoCatalog({
   cfg: { minAutoModels: 1, minAutoRatio: 0 },
 });
 const rejectIds = Object.values(rejectAuto.routes ?? {}).flatMap((r) => r.models.map((m) => m.id));
-(rejectAuto.ok && !rejectIds.includes('doc-gone') && rejectAuto.stats.rejected.includes('doc-gone')
-  && rejectAuto.stats.unresolved.some((u) => u.startsWith('doc-gone') && /widersprüchlich/.test(u)))
+rejectAuto.ok && !rejectIds.includes('doc-gone') && rejectAuto.stats.rejected.includes('doc-gone')
+  && rejectAuto.stats.unresolved.some((u) => u.startsWith('doc-gone') && /widersprüchlich/.test(u))
   ? ok('B1: vom Orakel verworfene ID bleibt draussen, auch der Snapshot holt sie nicht zurück')
   : fail('B1 im Auto-Modus: ' + JSON.stringify({ ids: rejectIds, rejected: rejectAuto.stats.rejected, unresolved: rejectAuto.stats.unresolved }));
+// Nit R5: der Leer-Routen-Gurt (Gurt 3) darf eine verworfene ID ebenfalls nicht
+// über den Snapshot-Rückfall zurückholen.
+const onlyRejected = buildAutoCatalog({
+  snapshot: {
+    routes: {
+      'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [{ id: 'rej-x', name: 'Rej X', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+      'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'msg-x', name: 'Msg X', contextWindow: 10, maxTokens: 5, input: ['text'] }] },
+    },
+  },
+  registryModels: {
+    'rej-x': { id: 'rej-x', name: 'Rej X', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+    'msg-x': { id: 'msg-x', name: 'Msg X', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+  },
+  roster: ['rej-x', 'msg-x'],
+  protocols: { 'msg-x': 'anthropic-messages' },
+  protocolRejects: ['rej-x'],
+  cfg: { minAutoModels: 1, minAutoRatio: 0 },
+});
+(!onlyRejected.ok && /ohne Modelle/.test(onlyRejected.reason ?? ''))
+  ? ok('Leer-Routen-Gurt holt eine verworfene ID nicht zurück (Auto verweigert, Snapshot gilt)')
+  : fail('Leer-Routen-Gurt reanimiert eine verworfene ID: ' + JSON.stringify({ ok: onlyRejected.ok, reason: onlyRejected.reason }));
 const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
 (!refused.ok) ? ok('Sicherheitsgurt: zu wenige Modelle -> Auto verweigert, Snapshot gilt') : fail('minAutoModels-Gurt greift nicht');
 
@@ -294,6 +315,9 @@ console.log('== lib/protocols.mjs fetchProtocolTable (Netz gestubbt, offline) ==
 {
   const realFetch = globalThis.fetch;
   const oracleDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-go-oracle-'));
+  // Nit R5: auch das Leer-Cache-Verzeichnis wird im finally aufgeräumt, damit
+  // ein Throw zwischen Anlegen und Löschen kein Temp-Verzeichnis hinterlässt.
+  const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-go-nocache-'));
   const cacheJson = (name) => path.join(oracleDir, name);
   const warmTable = { 'keep-a': 'openai-completions', 'doc-gone': 'openai-completions', 'beam-x': 'openai-completions' };
   fs.writeFileSync(cacheJson('protocols.json'), JSON.stringify({ fetchedAt: 'x', url: 'x', rows: 3, table: warmTable }));
@@ -309,12 +333,10 @@ console.log('== lib/protocols.mjs fetchProtocolTable (Netz gestubbt, offline) ==
       : fail('cache-fallback-Fall falsch: ' + JSON.stringify({ source: down.source, reason: down.reason, ids: Object.keys(down.table ?? {}).length }));
 
     // 2) Netz tot, kein Cache -> failed, Tabelle null (Host nimmt den Snapshot)
-    const emptyDir = fs.mkdtempSync(path.join(os.tmpdir(), 'dsh-go-nocache-'));
     const cold = await fetchProtocolTable({}, { cacheDir: emptyDir, roster });
     (cold.source === 'failed' && cold.table === null && cold.degraded === true)
       ? ok('Netz tot ohne Cache -> failed, table null (Snapshot gilt)')
       : fail('failed-Fall falsch: ' + JSON.stringify({ source: cold.source, table: cold.table }));
-    fs.rmSync(emptyDir, { recursive: true, force: true });
 
     // 3) Doku umgebaut (lesbar, aber 0 Zeilen) -> cache-shape-changed + reason shape
     globalThis.fetch = async () => ({ ok: true, status: 200, url: 'https://opencode.ai/v3/docs/go/', text: async () => '<html><body><h1>Go</h1><p>keine Tabelle mehr</p></body></html>' });
@@ -355,6 +377,7 @@ console.log('== lib/protocols.mjs fetchProtocolTable (Netz gestubbt, offline) ==
   } finally {
     globalThis.fetch = realFetch;
     fs.rmSync(oracleDir, { recursive: true, force: true });
+    fs.rmSync(emptyDir, { recursive: true, force: true });
   }
 }
 
