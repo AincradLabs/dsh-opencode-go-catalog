@@ -163,13 +163,13 @@ MiniMax M3 (`toggle`-only) → no menu.
 
 ## The protocol oracle
 
-No JSON endpoint discloses the **wire endpoint** per model, but the registry names the **lane** in
-`providers.opencode-go.models[<id>].provider.api`: `…/inference/go/openai/v1`,
-`…/inference/go/anthropic/v1` or `…/inference/go/google/v1beta` (33/33 entries on 2026-10-19, 0
-contradictions with the table below). The lane settles `anthropic` and `google` on its own but is
-ambiguous inside the OpenAI lane (`chat/completions` vs `responses`), so the docs table stays the
-oracle for that split. Using the lane as a second, path-independent oracle is tracked in
-[#10](https://github.com/AincradLabs/dsh-opencode-go-catalog/issues/10).
+No JSON endpoint discloses the **wire endpoint** per model, but the registry names the **lane** per
+model in the top-level `opencode-go` section, `models[<id>].provider.api`
+(`…/inference/go/openai/v1`, `…/inference/go/anthropic/v1` or `…/inference/go/google/v1beta`;
+33/33 entries on 2026-10-19, 0 contradictions with the table below). The lane settles `anthropic` and
+`google` on its own but is ambiguous inside the OpenAI lane (`chat/completions` vs `responses`), so
+the docs table stays the oracle for that split. Using the lane as a second, path-independent oracle
+is tracked in [#10](https://github.com/AincradLabs/dsh-opencode-go-catalog/issues/10).
 
 | Source | Verdict |
 |---|---|
