@@ -101,16 +101,27 @@ const FIXTURE = `<table>
 <tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
 <tr><td>Grok 4.7</td><td>grok-4.7</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>
 <tr><td>Claude Haiku 5.5</td><td>claude-haiku-5-5</td><td>https://opencode.ai/inference/go/v1/messages</td><td>@ai-sdk/anthropic</td></tr>
+<tr><td>MiniMax M3.1 Flash Free</td><td>minimax-m3.1-flash-free</td><td>https://opencode.ai/inference/go/openai/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
 <tr><td>Nicht live</td><td>not-in-roster</td><td>https://opencode.ai/inference/go/v1/chat/completions</td><td>@ai-sdk/openai-compatible</td></tr>
 </table>`;
-const fixRoster = new Set(['cat-jam-free', 'grok-4.7', 'claude-haiku-5-5']);
+const fixRoster = new Set(['cat-jam-free', 'grok-4.7', 'claude-haiku-5-5', 'minimax-m3.1-flash-free']);
 const parsed = parseProtocolTable(FIXTURE, { roster: fixRoster });
 (parsed.table['cat-jam-free'] === 'openai-completions') ? ok('chat/completions -> openai-completions') : fail('cat-jam-free falsch gemappt: ' + parsed.table['cat-jam-free']);
 (parsed.table['grok-4.7'] === 'openai-responses') ? ok('responses -> openai-responses') : fail('grok-4.7 falsch gemappt');
 (parsed.table['claude-haiku-5-5'] === 'anthropic-messages') ? ok('messages -> anthropic-messages') : fail('claude-haiku-5-5 falsch gemappt');
+// Regression 2026-10-19: die v2-Doku stellt die Lane in den Pfad
+// (/inference/go/openai/v1/...). Der alte Regex verlangte "/go/v1/" wörtlich und
+// lieferte 0 Zeilen -> neue Modelle fielen still aus dem Picker.
+(parsed.table['minimax-m3.1-flash-free'] === 'openai-completions')
+  ? ok('v2-Pfadform (…/go/<lane>/v1/chat/completions) wird erkannt')
+  : fail('v2-Pfadform NICHT erkannt (Regression: minimax-m3.1-flash-free & Co. verschwinden): ' + JSON.stringify(parsed.table));
 (!('not-in-roster' in parsed.table) && parsed.ignored.some((i) => i.includes('not-in-roster')))
   ? ok('Roster-Filter wirft Fremd-IDs weg (Regex-Fehltreffer erreichen keine Route)')
   : fail('Roster-Filter greift nicht');
+const sdkConflict = parseProtocolTable(FIXTURE + '<tr><td>Beam X</td><td>beam-x</td><td>https://opencode.ai/inference/go/openai/v1/chat/completions</td><td>@ai-sdk/anthropic</td></tr>', { roster: new Set([...fixRoster, 'beam-x']) });
+(!('beam-x' in sdkConflict.table) && sdkConflict.conflicts.some((c) => c.includes('beam-x')))
+  ? ok('URL-Pfad und SDK-Spalte uneinig -> ID fliegt raus (Gegenprobe statt raten)')
+  : fail('SDK-Gegenprobe greift nicht: ' + JSON.stringify({ table: sdkConflict.table['beam-x'], conflicts: sdkConflict.conflicts }));
 const conflict = parseProtocolTable(FIXTURE + '<tr><td>Cat Jam Free</td><td>cat-jam-free</td><td>https://opencode.ai/inference/go/v1/responses</td><td>@ai-sdk/openai</td></tr>', { roster: fixRoster });
 (conflict.conflicts.length === 1 && !('cat-jam-free' in conflict.table))
   ? ok('widersprüchliche Doppelzeile: ID fliegt ganz raus (nicht die erste behalten = raten) und wird gemeldet')
@@ -153,6 +164,30 @@ const noLimits = autoFixture.routes['opencode-go-responses'].models[0];
 (autoFixture.stats.vetoed.length === 1 && autoFixture.stats.vetoed[0] === 'veto-me') ? ok('Veto-Liste greift, "_"-Kommentare zählen nicht als ID') : fail('Veto-Liste falsch: ' + JSON.stringify(autoFixture.stats.vetoed));
 (autoFixture.stats.unresolved.length === 1 && autoFixture.stats.unresolved[0].startsWith('no-proto'))
   ? ok('unresolved statt raten (kein Protokoll)') : fail('unresolved falsch: ' + JSON.stringify(autoFixture.stats.unresolved));
+// Carry-over (19.10.2026): die v2-Doku listet nicht mehr jedes live vorhandene
+// Modell. Fehlt die Zeile, gilt das im Snapshot bereits belegte Protokoll —
+// gemeldet, damit die Zweithändigkeit sichtbar bleibt.
+const carrySnap = {
+  routes: {
+    'opencode-go-extras': { api: 'openai-completions', baseURL: 'https://x/v1', displayName: 'extras', models: [{ id: 'doc-gone', name: 'Doc Gone', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
+    'opencode-go-messages': { api: 'anthropic-messages', baseURL: 'https://x/v1', displayName: 'messages', models: [{ id: 'doc-live', name: 'Doc Live', contextWindow: 1000, maxTokens: 100, input: ['text'] }] },
+  },
+};
+const carryReg = {
+  'doc-gone': { id: 'doc-gone', name: 'Doc Gone', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+  'doc-live': { id: 'doc-live', name: 'Doc Live', limit: { context: 10, output: 5 }, modalities: { input: ['text'] } },
+};
+const carriedAuto = buildAutoCatalog({
+  snapshot: carrySnap,
+  registryModels: carryReg,
+  roster: ['doc-gone', 'doc-live'],
+  protocols: { 'doc-live': 'anthropic-messages' },
+  cfg: { minAutoModels: 1, minAutoRatio: 0 },
+});
+(carriedAuto.ok && carriedAuto.stats.carried.length === 1 && carriedAuto.stats.carried[0] === 'doc-gone'
+  && carriedAuto.routes['opencode-go-extras'].models.some((m) => m.id === 'doc-gone'))
+  ? ok('Doku listet ID nicht mehr -> belegtes Snapshot-Protokoll gilt weiter (gemeldet als carried)')
+  : fail('Carry-over greift nicht: ' + JSON.stringify(carriedAuto.stats.carried));
 const refused = buildAutoCatalog({ snapshot: snapFixture, registryModels: regFixture, roster: ['a-new'], protocols: { 'a-new': 'openai-completions' }, cfg: { minAutoModels: 5 } });
 (!refused.ok) ? ok('Sicherheitsgurt: zu wenige Modelle -> Auto verweigert, Snapshot gilt') : fail('minAutoModels-Gurt greift nicht');
 
